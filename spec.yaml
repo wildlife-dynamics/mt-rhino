@@ -26,7 +26,7 @@ rjsf-overrides:
     base_map_defs.properties.base_maps.default:
       - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
         opacity: 1
-    rhino_report.properties.template_path.default: "https://raw.githubusercontent.com/wildlife-dynamics/mt-rhino/main/resources/templates/mt_rhino_report_template.docx"
+    rhino_report.properties.template_path.default: "/Users/yunwu/MEP/wt/mt-rhino/resources/templates/mt_rhino_report_template.docx"
 
   uiSchema:
     Process Patrols.filter_patrol_coords.filter_point_coords.items.ui:options.label: false
