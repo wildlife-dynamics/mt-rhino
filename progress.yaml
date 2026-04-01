@@ -1,8 +1,8 @@
 phase: publish
-status: in-progress
-currentStep: 1
-stepsCompleted: []
-stepsSkipped: []
+status: completed
+currentStep: done
+stepsCompleted: [1, 2, 3, 4, 5, 6, 7]
+stepsSkipped: [6]
 steps:
   1: Pre-publish Checks
   2: Update Task Libraries
@@ -12,4 +12,4 @@ steps:
   6: Generate User Guide
   7: Commit & PR
 lastUpdated: '2026-04-01'
-notes: ''
+notes: 'PR created: wildlife-dynamics/mt-rhino#1'
