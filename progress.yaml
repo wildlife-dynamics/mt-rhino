@@ -1,19 +1,15 @@
-phase: develop
-status: completed
-currentStep: done
-stepsCompleted: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+phase: publish
+status: in-progress
+currentStep: 1
+stepsCompleted: []
 stepsSkipped: []
 steps:
-  1: Load Context
-  2: Gather Requirements
-  3: Find/Create Tasks
-  4: Modify Spec
-  5: Compile Loop
-  6: Test Loop
-  7: Validate Outputs
-  8: Configure rjsf
-  9: Configure Layout
-  10: Self-Check
-  11: Summary
+  1: Pre-publish Checks
+  2: Update Task Libraries
+  3: Update Versions
+  4: Recompile (Mode 3)
+  5: Test (Mode 3)
+  6: Generate User Guide
+  7: Commit & PR
 lastUpdated: '2026-04-01'
-notes: 'Phase 3 complete. Live SMART API connected. All outputs validated.'
+notes: ''
