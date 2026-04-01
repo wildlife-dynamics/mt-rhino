@@ -1,0 +1,18 @@
+base:
+  name: Mara Triangle Rhino Report
+  mock_io: false
+  params:
+    workflow_details:
+      name: "Mara Triangle Rhino Report"
+    time_range:
+      since: "2026-02-01T00:00:00"
+      until: "2026-02-28T23:59:59"
+    smart_client_name:
+      data_source:
+        name: "mara_triangle"
+    base_map_defs:
+      base_maps:
+        - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
+          opacity: 1
+    rhino_report:
+      template_path: "/Users/yunwu/MEP/wt/mt-rhino/resources/templates/mt_rhino_report_template.docx"
