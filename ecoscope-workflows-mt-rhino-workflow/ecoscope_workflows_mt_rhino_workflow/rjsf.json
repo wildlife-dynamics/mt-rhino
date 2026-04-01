@@ -311,7 +311,7 @@
           "title": "Template Path",
           "type": "string",
           "description": "Path or URL to the Word template (.docx) file with Jinja2 placeholders. Supports local paths and remote URLs (http://, https://).",
-          "default": "/Users/yunwu/MEP/wt/mt-rhino/resources/templates/mt_rhino_report_template.docx"
+          "default": "https://raw.githubusercontent.com/wildlife-dynamics/mt-rhino/main/resources/templates/mt_rhino_report_template.docx"
         }
       },
       "required": [
