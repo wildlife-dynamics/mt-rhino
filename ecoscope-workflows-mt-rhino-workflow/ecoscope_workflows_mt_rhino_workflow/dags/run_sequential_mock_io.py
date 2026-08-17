@@ -1335,7 +1335,11 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .partial(
             geodataframe=rhino_colormap,
             layer_style={"get_radius": 5.0, "fill_color_column": "rhino_colormap"},
-            legend={"label_column": "Rhino Name", "color_column": "rhino_colormap"},
+            legend={
+                "label_column": "Rhino Name",
+                "color_column": "rhino_colormap",
+                "sort": "ascending",
+            },
             tooltip_columns=["Rhino Name", "Sighting Method", "time"],
             **(params.get("rhino_point_layer") or {}),
         )
@@ -1786,6 +1790,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         )
         .partial(
             skip=False,
+            missing_text="(No data)",
             context={
                 "items": [
                     {

@@ -676,6 +676,7 @@ workflow:
           legend:
             label_column: "Rhino Name"
             color_column: "rhino_colormap"
+            sort: "ascending"
           tooltip_columns: ["Rhino Name", "Sighting Method", "time"]
 
       - name: Draw Rhino Ecomap
@@ -891,6 +892,7 @@ workflow:
     task: create_docx
     partial:
       skip: false           # bound so the Skip toggle stays off the form
+      missing_text: "(No data)"   # shown where a skipped map/chart would be
       context:
         items:
           - item_type: timerange
