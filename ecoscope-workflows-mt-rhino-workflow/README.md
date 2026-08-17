@@ -30,7 +30,7 @@ installed_requirements:
   name: pydantic
   version: {version: ==2.8.2}
 params_sha256: 1a0f38dbd6bfc7d19fc5cdf77cfc081ef4f9260038f0f2dd625de125eb03f350
-spec_sha256: 45b99f80f130d545f364d43c8b3b5a66cb6a4fef08d1fdac98f55db4deed4521
+spec_sha256: d129316c66b038225bb22d100a828a45a0f5ef89f3d3ab05c3b9a68415b7211b
 
 ```
 

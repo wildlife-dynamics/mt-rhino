@@ -5,9 +5,9 @@
 This workflow helps you to monitor black rhino conservation activity in the Maasai Mara: it combines **rhino monitoring patrols** and **Black Rhino Sighting** events from EarthRanger into maps, summary tables, charts, and a ready-to-share Word report for a chosen reporting period.
 
 **What this workflow does:**
-- Downloads rhino monitoring patrols (Foot and Vehicle, for both the **Mara Triangle** and the **National Reserve**) from EarthRanger
+- Downloads rhino monitoring patrols (Foot and Vehicle, for both the **Mara Triangle** and the **National Reserve**) from EarthRanger, along with their **Patrol Information** events to identify the patrol team
 - Downloads **Black Rhino Sighting** events and breaks each one down into individual rhino sightings, with the rhino's name and the sighting method (Visual, Camera Trap, Dung, Spoor, or Telemetry)
-- Creates two interactive patrol trajectory maps — one for Mara Triangle patrols, one for Reserve patrols — colored by patrol type
+- Creates two interactive patrol trajectory maps — one for Mara Triangle patrols, one for Reserve patrols — colored by patrol team
 - Creates an interactive map of individual rhino sightings, colored by rhino
 - Summarizes sightings per rhino with one count column per sighting method plus a total
 - Draws a stacked bar chart of sightings per rhino, stacked by sighting method
@@ -34,6 +34,7 @@ Before using this workflow, you need:
 3. **Rhino monitoring data** set up in EarthRanger
    - The four rhino monitoring patrol types must exist: Rhino Monitoring - Foot/Vehicle (Triangle) and Rhino Monitoring - Foot/Vehicle (Reserve)
    - The **Black Rhino Sighting** event type must be configured with the per-individual sighting details (Bulls, Cows, and Unsexed Individuals sections)
+   - Patrols should have a **Patrol Information** event with the **Team name** filled in — patrols without one appear as "Unknown" on the maps
    - You can review event types at `https://<your-site>.pamdas.org/admin/activity/eventtype/`
 
 ## Installation
@@ -95,7 +96,6 @@ The background map tiles used by all three maps.
 - **Template Path**: The Word template used for the DOCX report
   - Default: the template published with this workflow
   - Note: Only change this if you maintain a customized report template
-- **Skip**: Turn on to skip report generation entirely
 
 ## Running the Workflow
 
@@ -130,6 +130,7 @@ After the workflow completes successfully, you'll find your outputs in the desig
 - **Contents**: One row per patrol track segment, for all four rhino monitoring patrol types
   - `patrol_type`: Patrol type slug (e.g., `rhino_monitoring_patrol`)
   - `patrol_type_display`: Readable patrol type (e.g., `Rhino Monitoring - Foot (Triangle)`)
+  - `team_name`: The patrol team from the Patrol Information event (`Unknown` when the event is missing)
   - `patrol_title`, `patrol_serial_number`, `patrol_subject`: Patrol identification
   - `segment_start` / `segment_end`, `timespan_seconds`, `speed_kmhr`: Segment movement details
 
@@ -157,13 +158,13 @@ The workflow creates an interactive dashboard with 5 visualizations:
 #### Mara Triangle Rhino Patrols (map)
 - **Format**: Interactive trajectory map
 - **Features**:
-  - Patrol tracks for the two Triangle patrol types, colored by patrol type
+  - Patrol tracks for the two Triangle patrol types, colored by **patrol team** (from each patrol's Patrol Information event)
   - Legend (bottom right) and north arrow (top left)
-  - Interactive hover: Start Time, Duration (s), Speed (kph) per segment
+  - Interactive hover: Team, Start Time, Duration (s), Speed (kph) per segment
 
 #### Reserve Rhino Patrols (map)
 - **Format**: Interactive trajectory map
-- **Features**: Same as the Triangle map, for the two Reserve patrol types — colors are consistent across both maps
+- **Features**: Same as the Triangle map, for the two Reserve patrol types — team colors are consistent across both maps
 
 #### Rhino Sightings (map)
 - **Format**: Interactive point map
@@ -262,12 +263,12 @@ Here are some typical scenarios and how to configure the workflow for each:
 - Check that the events have the individual sighting details filled in (Bulls / Cows / Unsexed Individuals sections) — events without any individuals recorded cannot be broken down
 - Verify events have a location; events without coordinates are excluded from the maps
 
-#### Report generation fails on an empty period
-**Problem**: The run fails at the report step when the selected period has no patrols and no sightings at all
+#### A report section is blank
+**Problem**: The generated report has an empty spot where a map, table, or chart should be — for example no Mara Triangle map for a month with no Triangle rhino patrols
 
 **Solutions**:
-- Choose a period that contains at least some patrol or sighting data
-- Alternatively, turn on **Skip** under Create Rhino Report to produce the dashboard without the DOCX report
+- This is expected when the period has no data for that section: the report still generates, with the missing section left blank
+- Check in EarthRanger that the missing area's patrols were closed out (status Done) for the period
 
 #### Workflow runs very slowly
 **Problem**: The workflow takes a long time to finish

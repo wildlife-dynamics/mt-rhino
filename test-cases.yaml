@@ -31,16 +31,40 @@ mock:
         - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
           opacity: 1
     rhino_report:
-      template_path: "/Users/yunwu/MEP/wt-workflows/mt-rhino/resources/templates/mt_rhino_report_template.docx"  # local while template changes are unmerged; publish flow restores the raw URL
+      template_path: "../resources/templates/mt_rhino_report_template.docx"  # relative to the inner workflow dir (CLI cwd); publish flow restores the raw URL
 
-# NOTE: no empty-data test case. Zero-row fixtures exist
-# (dev/fixtures/*-empty.example-return.parquet) and everything up to the
-# report behaves (skips cascade, widget tasks emit placeholders, empty
-# exports are written), but create_docx cannot accept SkipSentinel for
-# direct (ungrouped) image/table context items, so the run fails at
-# rhino_report on an empty month. Same latent behavior as the SMART-era
-# spec. Fixing it needs an ext-custom change (drop skipped direct context
-# items) — tracked as a follow-up task gap.
+mock_empty:
+  name: Mara Triangle Rhino Report (mocked IO, empty fixtures — skipif/placeholder path)
+  mock_io: true
+  # Zero-row variants of the synthetic fixtures: every data-dependent task
+  # skips, widget-create tasks (skipif never) emit placeholders, empty
+  # exports are written, and the report renders with blank sections
+  # (create_docx drops skipped direct context items).
+  mock_io_overrides:
+    ecoscope.platform.tasks.io.get_patrols_from_combined_params: dev/fixtures/get-patrols-rhino-empty.example-return.parquet
+    ecoscope.platform.tasks.io.get_patrol_observations_from_patrols_df_and_combined_params: dev/fixtures/patrol-obs-rhino-empty.example-return.parquet
+    ecoscope.platform.tasks.io.get_events: dev/fixtures/get-events-rhino-empty.example-return.parquet
+    ecoscope.platform.tasks.io.process_events_details: dev/fixtures/process-events-details-rhino-empty.example-return.parquet
+  params:
+    workflow_details:
+      name: "Mara Triangle Rhino Report (Empty)"
+    time_range:
+      since: "2026-07-01T00:00:00"
+      until: "2026-07-31T23:59:59"
+      timezone:
+        label: "(GMT+03:00) Nairobi"
+        tzCode: "Africa/Nairobi"
+        name: "East Africa Time"
+        utc: "+03:00"
+    er_client_name:
+      data_source:
+        name: "mmnr"
+    base_map_defs:
+      base_maps:
+        - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
+          opacity: 1
+    rhino_report:
+      template_path: "../resources/templates/mt_rhino_report_template.docx"  # relative to the inner workflow dir (CLI cwd); publish flow restores the raw URL
 
 base:
   name: Mara Triangle Rhino Report
@@ -65,4 +89,4 @@ base:
         - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
           opacity: 1
     rhino_report:
-      template_path: "/Users/yunwu/MEP/wt-workflows/mt-rhino/resources/templates/mt_rhino_report_template.docx"  # local while template changes are unmerged; publish flow restores the raw URL
+      template_path: "../resources/templates/mt_rhino_report_template.docx"  # relative to the inner workflow dir (CLI cwd); publish flow restores the raw URL

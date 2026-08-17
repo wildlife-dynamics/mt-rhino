@@ -257,10 +257,9 @@ print(
     f"individuals: {n_individuals}, patrol-info events: {len(info_rows)}"
 )
 
-# Zero-row variants (schema preserved) for manual empty-month/skipif testing.
-# Not wired to a committed test case: create_docx rejects SkipSentinel for
-# direct context items, so a full empty run fails at rhino_report (see
-# test-cases.yaml note).
+# Zero-row variants (schema preserved) for the mock_empty test case:
+# skips cascade, widgets emit placeholders, exports are written empty, and
+# the report renders with blank sections (create_docx drops skipped items).
 for stem in [
     "get-patrols-rhino",
     "patrol-obs-rhino",
