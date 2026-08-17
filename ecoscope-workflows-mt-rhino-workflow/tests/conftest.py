@@ -6,10 +6,9 @@ import hashlib
 import io
 import json
 import uuid
-from collections.abc import Coroutine, Generator, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Coroutine, Generator, Iterator, Literal
 from unittest.mock import patch
 
 import numpy as np
@@ -43,8 +42,10 @@ TEST_CASES_YAML = ARTIFACTS.parent / "test-cases.yaml"
 MATCHSPEC_OVERRIDE = "ecoscope-workflows-mt-rhino-workflow"
 RESULTS_ENV_VAR = "ECOSCOPE_WORKFLOWS_RESULTS"
 IO_TASKS_IMPORTABLE_REFERENCES = [
-    "ecoscope.platform.tasks.io.get_patrol_observations_from_smart",
-    "ecoscope.platform.tasks.io.get_events_from_smart",
+    "ecoscope.platform.tasks.io.get_patrols_from_combined_params",
+    "ecoscope.platform.tasks.io.get_patrol_observations_from_patrols_df_and_combined_params",
+    "ecoscope.platform.tasks.io.get_events",
+    "ecoscope.platform.tasks.io.process_events_details",
 ]
 
 yaml = ruamel.yaml.YAML(typ="safe")

@@ -53,11 +53,11 @@
       "description": "Choose the period of time to analyze.",
       "title": "Time Range"
     },
-    "smart_client_name": {
+    "er_client_name": {
       "additionalProperties": false,
       "properties": {
         "data_source": {
-          "$ref": "#/$defs/SMARTConnection",
+          "$ref": "#/$defs/EarthRangerConnection",
           "title": "",
           "description": "Select one of your configured data sources."
         }
@@ -93,21 +93,6 @@
       "required": [],
       "type": "object",
       "title": "Convert to Trajectories"
-    },
-    "process_rhino": {
-      "additionalProperties": false,
-      "properties": {
-        "sanitize": {
-          "default": true,
-          "title": "Sanitize",
-          "type": "boolean",
-          "description": "Whether to sanitize the DataFrame for Arrow/SQLite compatibility before querying. When True (default), complex columns (list, dict, set, bytes) are converted to JSON strings so pandasql/SQLite accepts them, removing the need for the 'columns' whitelist. Geometry columns are preserved. Set to False to pass columns through untouched.",
-          "ecoscope:advanced": true
-        }
-      },
-      "required": [],
-      "type": "object",
-      "title": "Filter Rhino Sightings"
     },
     "base_map_defs": {
       "additionalProperties": false,
@@ -302,6 +287,108 @@
       "required": [],
       "title": "Base Maps"
     },
+    "rhino_summary": {
+      "additionalProperties": false,
+      "properties": {
+        "left_on": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Left On",
+          "description": "Column or index level names to join on in the left DataFrame."
+        },
+        "right_on": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Right On",
+          "description": "Column or index level names to join on in the right DataFrame."
+        },
+        "left_index": {
+          "default": false,
+          "title": "Left Index",
+          "type": "boolean",
+          "description": "Use the index from the left DataFrame as the join key(s)."
+        },
+        "right_index": {
+          "default": false,
+          "title": "Right Index",
+          "type": "boolean",
+          "description": "Use the index from the right DataFrame as the join key(s)."
+        }
+      },
+      "required": [],
+      "type": "object",
+      "title": "Merge Summary Columns"
+    },
+    "rhino_bar": {
+      "additionalProperties": false,
+      "properties": {
+        "time_interval": {
+          "default": null,
+          "enum": [
+            "year",
+            "month",
+            "week",
+            "day",
+            "hour"
+          ],
+          "title": "Time Interval",
+          "type": "string",
+          "description": "The time bucket for the x axis \u2014 how metrics are summarized over time. If unset, the raw x_axis values are the buckets (categorical x axis)."
+        },
+        "time_breakdown": {
+          "default": null,
+          "enum": [
+            "year",
+            "month",
+            "week",
+            "day"
+          ],
+          "title": "Time Breakdown",
+          "type": "string",
+          "description": "Break the single metric into one series per period of this size, overlaid on a shared within-period axis. Must be coarser than time_interval; mutually exclusive with category."
+        },
+        "plot_style": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/PlotStyle"
+            }
+          ],
+          "default": null,
+          "title": "Plot Style",
+          "description": "Additional style kwargs passed to each trace.",
+          "ecoscope:advanced": true
+        }
+      },
+      "required": [],
+      "type": "object",
+      "title": "Draw Stacked Bar Chart"
+    },
     "rhino_report": {
       "additionalProperties": false,
       "properties": {
@@ -354,7 +441,7 @@
       "title": "TimezoneInfo",
       "type": "object"
     },
-    "SMARTConnection": {
+    "EarthRangerConnection": {
       "properties": {
         "name": {
           "title": "Data Source",
@@ -364,7 +451,7 @@
       "required": [
         "name"
       ],
-      "title": "SMARTConnection",
+      "title": "EarthRangerConnection",
       "type": "object"
     },
     "TrajectorySegmentFilter": {
@@ -414,6 +501,119 @@
       },
       "title": "TrajectorySegmentFilter",
       "type": "object"
+    },
+    "LineStyle": {
+      "properties": {
+        "color": {
+          "default": null,
+          "ecoscope:advanced": true,
+          "title": "Color",
+          "type": "string"
+        },
+        "dash": {
+          "default": null,
+          "ecoscope:advanced": true,
+          "title": "Dash",
+          "type": "string"
+        },
+        "shape": {
+          "default": null,
+          "ecoscope:advanced": true,
+          "title": "Shape",
+          "type": "string"
+        }
+      },
+      "title": "LineStyle",
+      "type": "object"
+    },
+    "PlotStyle": {
+      "properties": {
+        "xperiodalignment": {
+          "default": null,
+          "ecoscope:advanced": true,
+          "title": "Xperiodalignment",
+          "type": "string"
+        },
+        "marker_colors": {
+          "default": null,
+          "ecoscope:advanced": true,
+          "items": {
+            "type": "string"
+          },
+          "title": "Marker Colors",
+          "type": "array"
+        },
+        "textinfo": {
+          "default": null,
+          "ecoscope:advanced": true,
+          "title": "Textinfo",
+          "type": "string"
+        },
+        "textposition": {
+          "default": null,
+          "ecoscope:advanced": true,
+          "title": "Textposition",
+          "type": "string"
+        },
+        "texttemplate": {
+          "default": null,
+          "ecoscope:advanced": true,
+          "title": "Texttemplate",
+          "type": "string"
+        },
+        "line": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/LineStyle"
+            }
+          ],
+          "default": null,
+          "ecoscope:advanced": true,
+          "title": "Line"
+        },
+        "fillcolor": {
+          "default": null,
+          "ecoscope:advanced": true,
+          "title": "Fillcolor",
+          "type": "string"
+        },
+        "mode": {
+          "default": null,
+          "ecoscope:advanced": true,
+          "title": "Mode",
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "ecoscope:advanced": true,
+          "title": "Name",
+          "type": "string"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            }
+          ],
+          "default": null,
+          "ecoscope:advanced": true,
+          "title": "Width"
+        },
+        "xperiod": {
+          "default": null,
+          "ecoscope:advanced": true,
+          "title": "Xperiod",
+          "type": "string"
+        }
+      },
+      "title": "PlotStyle",
+      "type": "object"
     }
   },
   "uiSchema": {
@@ -430,6 +630,21 @@
         "timezone"
       ]
     },
+    "rhino_summary": {
+      "ui:order": [
+        "left_on",
+        "right_on",
+        "left_index",
+        "right_index"
+      ]
+    },
+    "rhino_bar": {
+      "ui:order": [
+        "time_interval",
+        "time_breakdown",
+        "plot_style"
+      ]
+    },
     "rhino_report": {
       "ui:order": [
         "template_path",
@@ -439,10 +654,11 @@
     "ui:order": [
       "workflow_details",
       "time_range",
-      "smart_client_name",
+      "er_client_name",
       "patrol_traj",
-      "process_rhino",
       "base_map_defs",
+      "rhino_summary",
+      "rhino_bar",
       "rhino_report"
     ]
   },
