@@ -1,18 +1,31 @@
 mock:
-  name: Mara Triangle Rhino Report (mocked IO, local fixtures)
+  name: Mara Triangle Rhino Report (mocked IO, synthetic fixtures)
   mock_io: true
+  # All four fetch tasks are io-tagged; override their canned returns with
+  # SYNTHETIC fixtures (dev/fixtures/build_rhino_fixtures.py — real mmnr
+  # rhino data is sensitive and never committed) shaped exactly like
+  # production: title-mapped nested sighting-details arrays, patrol slug /
+  # display columns, Jul 2026 timestamps.
   mock_io_overrides:
-    ecoscope.platform.tasks.io.get_patrol_observations_from_smart: resources/mock-data/mock_patrol_reloc.parquet
-    ecoscope.platform.tasks.io.get_events_from_smart: resources/mock-data/mock_smart_events.parquet
+    ecoscope.platform.tasks.io.get_patrols_from_combined_params: dev/fixtures/get-patrols-rhino.example-return.parquet
+    ecoscope.platform.tasks.io.get_patrol_observations_from_patrols_df_and_combined_params: dev/fixtures/patrol-obs-rhino.example-return.parquet
+    ecoscope.platform.tasks.io.get_events: dev/fixtures/get-events-rhino.example-return.parquet
+    ecoscope.platform.tasks.io.process_events_details: dev/fixtures/process-events-details-rhino.example-return.parquet
   params:
     workflow_details:
       name: "Mara Triangle Rhino Report (Mock)"
+      description: "Rhino monitoring from EarthRanger (mmnr)"
     time_range:
-      since: "2026-02-01T00:00:00"
-      until: "2026-02-28T23:59:59"
-    smart_client_name:
+      since: "2026-07-01T00:00:00"
+      until: "2026-07-31T23:59:59"
+      timezone:
+        label: "(GMT+03:00) Nairobi"
+        tzCode: "Africa/Nairobi"
+        name: "East Africa Time"
+        utc: "+03:00"
+    er_client_name:
       data_source:
-        name: "mara_triangle"
+        name: "mmnr"
     base_map_defs:
       base_maps:
         - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
@@ -26,12 +39,18 @@ base:
   params:
     workflow_details:
       name: "Mara Triangle Rhino Report"
+      description: "Rhino monitoring from EarthRanger (mmnr)"
     time_range:
-      since: "2026-02-01T00:00:00"
-      until: "2026-02-28T23:59:59"
-    smart_client_name:
+      since: "2026-07-01T00:00:00"
+      until: "2026-07-31T23:59:59"
+      timezone:
+        label: "(GMT+03:00) Nairobi"
+        tzCode: "Africa/Nairobi"
+        name: "East Africa Time"
+        utc: "+03:00"
+    er_client_name:
       data_source:
-        name: "mara_triangle"
+        name: "mmnr"
     base_map_defs:
       base_maps:
         - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"

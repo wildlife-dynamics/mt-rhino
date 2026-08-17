@@ -1,15 +1,47 @@
 id: mt_rhino
 
 requirements:
-  - name: ecoscope-platform
-    version: ">=2.18.2, <2.19.0"
-    channel: https://repo.prefix.dev/ecoscope-workflows/
+  # DEV ONLY: local editable ecoscope on branch optional-time-interval
+  # (worktree checkout), which carries the generalized draw_chart task
+  # (optional time_interval -> categorical x axis, per-figure bar/line).
+  # Before publish: revert to a released ecoscope-platform pin that ships
+  # draw_chart. Run dev/postcompile-editable.sh after every compile
+  # (pydantic + platform patches), then test with --frozen.
+  # NOTE: "plotting" extra is required — ext-custom's entry point imports
+  # plotly via the ecoplot helpers, and without it discovery silently drops
+  # every ext-custom task.
+  - name: ecoscope
+    path: /Users/yunwu/MEP/wt-tasks/ecoscope/.claude/worktrees/optional-time-interval
+    editable: true
+    extras: ["platform", "mapping", "analysis", "plotting"]
+  # DEV MODE: editable local ext-custom (pivot_dataframe,
+  # merge_two_dataframes, create_docx). Before publish: restore the
+  # versioned channel requirement (>= 0.1.0rc24).
   - name: ecoscope-workflows-ext-custom
-    version: "0.1.0rc24"
-    channel: https://repo.prefix.dev/ecoscope-workflows-custom/
-  # ecoscope-platform already declares this exact pydeck dependency. it is
-  # re-stated here as a workaround for a known issue. for further detail, see:
-  # https://github.com/wildlife-dynamics/wt/issues/167#issuecomment-4451993697
+    path: /Users/yunwu/MEP/wt-tasks/ecoscope-workflow-task-library/src/ecoscope-workflows-ext-custom
+    editable: true
+  # editable ext-custom declares setuptools<=81.0.0; pin the conda side to
+  # match or the pypi solve conflicts with the conda-pinned setuptools
+  - name: setuptools
+    version: "<=81.0.0"
+    channel: conda-forge
+  # Editable-mode conda pins (see ecoscope-spec.md "editable dev-mode
+  # pitfalls"): lonboard ==0.0.8 only exists as the conda build on the
+  # ecoscope-workflows channel; numpy is pinned strictly by ecoscope;
+  # pyarrow <24 per ecoscope-earthranger-io-core; rasterio <1.5 avoids the
+  # libgdal/pyogrio conflict and the missing osx-arm64 wheel.
+  - name: lonboard
+    version: "==0.0.8"
+    channel: https://repo.prefix.dev/ecoscope-workflows/
+  - name: numpy
+    version: ">=2,<2.1"
+    channel: conda-forge
+  - name: pyarrow
+    version: ">=20,<24"
+    channel: conda-forge
+  - name: rasterio
+    version: ">=1.3,<1.5"
+    channel: conda-forge
   - name: pydeck
     version: "0.9.2"
     channel: conda-forge
@@ -38,7 +70,7 @@ task-instance-defaults:
       - any_dependency_skipped
 
 workflow:
-  # Setup
+  # ── Setup ──────────────────────────────────────────────
   - name: Workflow Details
     id: workflow_details
     task: set_workflow_details
@@ -56,26 +88,46 @@ workflow:
       time_range: ${{ workflow.time_range.return }}
 
   - name: Data Source
-    id: smart_client_name
-    task: set_smart_connection
+    id: er_client_name
+    task: set_er_connection
 
-  - name: Get Patrol Observations
-    id: patrol_obs
-    task: ecoscope.platform.tasks.io.get_patrol_observations_from_smart
-    partial:
-      client: ${{ workflow.smart_client_name.return }}
-      time_range: ${{ workflow.time_range.return }}
-      ca_uuid: "735606d2-c34e-49c3-a45b-7496ca834e58"
-      language_uuid: "13451893-86af-4ec0-beac-2b8e0c2482b5"
-      patrol_mandate: null
-      patrol_transport: null
+  # ── Fetch Patrols (EarthRanger) ────────────────────────
+  - title: Fetch Patrols
+    type: task-group
+    description: "Fetch rhino monitoring patrols and observations from EarthRanger."
+    tasks:
+      - name: Set Patrol Parameters
+        id: er_patrol_params
+        task: set_patrols_and_patrol_events_params
+        partial:
+          client: ${{ workflow.er_client_name.return }}
+          time_range: ${{ workflow.time_range.return }}
+          patrol_types:
+            - rhino_monitoring_patrol            # Rhino Monitoring - Foot (Triangle)
+            - rhino_monitoring_vehicle_patrol    # Rhino Monitoring - Vehicle (Triangle)
+            - rhino_monitor_patrol_reserve       # Rhino Monitoring - Foot (Reserve)
+            - rhino_monitoring_veh_patrol_reserve  # Rhino Monitoring - Vehicle (Reserve)
+          event_types: []
+          status: ["done"]
+          include_patrol_details: true
+          raise_on_empty: false
+          include_null_geometry: true
+          truncate_to_time_range: true
+          sub_page_size: 100
+          patrols_overlap_daterange: true
 
-  # Phase 2: load_df stand-in (uncomment to develop with local data)
-  # - name: Load Patrol Observations
-  #   id: patrol_obs
-  #   task: ecoscope_workflows_ext_custom.tasks.io.load_df
-  #   partial:
-  #     deserialize_json: false
+      - name: Get Patrols
+        id: prefetch_patrols
+        task: get_patrols_from_combined_params
+        partial:
+          combined_params: ${{ workflow.er_patrol_params.return }}
+
+      - name: Get Patrol Observations
+        id: patrol_obs
+        task: get_patrol_observations_from_patrols_df_and_combined_params
+        partial:
+          patrols_df: ${{ workflow.prefetch_patrols.return }}
+          combined_params: ${{ workflow.er_patrol_params.return }}
 
   - name: Convert Patrol Observations to Timezone
     id: convert_patrols_tz
@@ -83,9 +135,9 @@ workflow:
     partial:
       df: ${{ workflow.patrol_obs.return }}
       timezone: ${{ workflow.get_timezone.return }}
-      columns: ["fixtime"]
+      columns: ["fixtime", "patrol_start_time", "patrol_end_time"]
 
-  # Process Patrols
+  # ── Process Patrols ────────────────────────────────────
   - title: Process Patrols
     type: task-group
     description: "Process patrol observations into rhino monitoring trajectories."
@@ -98,11 +150,23 @@ workflow:
           prefix: "extra__"
           duplicate_strategy: "suffix"
 
+      - name: Rename Patrol Columns
+        id: rename_patrol_cols
+        task: map_columns
+        partial:
+          df: ${{ workflow.drop_prefix_obs.return }}
+          drop_columns: ["patrol_type"]           # UUID column
+          rename_columns:
+            patrol_type__value: "patrol_type"     # slug
+            patrol_type__display: "patrol_type_display"
+          retain_columns: []
+          raise_if_not_found: false
+
       - name: Filter Patrol Coordinates
         id: filter_patrol_coords
         task: apply_reloc_coord_filter
         partial:
-          df: ${{ workflow.drop_prefix_obs.return }}
+          df: ${{ workflow.rename_patrol_cols.return }}
           roi_gdf: null
           roi_name: null
           reset_index: false
@@ -140,51 +204,52 @@ workflow:
           retain_columns: []
           raise_if_not_found: false
 
-      - name: Filter Rhino Monitoring Patrols
-        id: filter_rhino_patrols
-        task: filter_row_values
-        partial:
-          df: ${{ workflow.cleanup_traj_cols.return }}
-          column: "patrol_mandate"
-          values: ["Rhino Monitoring"]
-
       - name: Patrol Trajectory Colormap
         id: patrol_colormap
         task: apply_color_map
         partial:
-          df: ${{ workflow.filter_rhino_patrols.return }}
-          input_column_name: "station"
+          df: ${{ workflow.cleanup_traj_cols.return }}
+          input_column_name: "patrol_type_display"
           output_column_name: "patrol_colormap"
           colormap: "Dark2"
 
-  - name: Get SMART Events
-    id: smart_events
-    task: ecoscope.platform.tasks.io.get_events_from_smart
+  # ── Fetch & Process Rhino Sightings (EarthRanger) ──────
+  - name: Get Rhino Sighting Events
+    id: er_events
+    task: get_events
     partial:
-      client: ${{ workflow.smart_client_name.return }}
+      client: ${{ workflow.er_client_name.return }}
       time_range: ${{ workflow.time_range.return }}
-      ca_uuid: "735606d2-c34e-49c3-a45b-7496ca834e58"
-      language_uuid: "13451893-86af-4ec0-beac-2b8e0c2482b5"
+      event_types: ["black_rhino_sighting_v202310"]
+      event_columns: null
+      include_null_geometry: false
+      raise_on_empty: false
+      include_details: true
+      include_updates: false
+      include_related_events: false
+      include_display_values: true
+      force_point_geometry: true
 
-  # Phase 2: load_df stand-in (uncomment to develop with local data)
-  # - name: Load SMART Events
-  #   id: smart_events
-  #   task: ecoscope_workflows_ext_custom.tasks.io.load_df
-  #   partial:
-  #     deserialize_json: false
+  - name: Resolve Event Details
+    id: events_details
+    task: process_events_details
+    partial:
+      df: ${{ workflow.er_events.return }}
+      client: ${{ workflow.er_client_name.return }}
+      map_to_titles: true
+      ordered: true
 
   - name: Convert Events to Timezone
     id: convert_events_tz
     task: convert_values_to_timezone
     partial:
-      df: ${{ workflow.smart_events.return }}
+      df: ${{ workflow.events_details.return }}
       timezone: ${{ workflow.get_timezone.return }}
       columns: ["time"]
 
-  # Process Rhino Sightings
   - title: Process Sightings
     type: task-group
-    description: "Process SMART events into rhino sighting records."
+    description: "Flatten rhino sighting details into one record per individual sighting."
     tasks:
       - name: Filter Event Coordinates
         id: filter_event_coords
@@ -204,71 +269,46 @@ workflow:
             - {x: 0.0, y: 0.0}
             - {x: 1.0, y: 1.0}
 
-      - name: Normalize Extracted Attributes
-        id: normalize_attrs
-        task: normalize_json_column
-        partial:
-          df: ${{ workflow.filter_event_coords.return }}
-          column: "extracted_attributes"
-          skip_if_not_exists: true
-          sort_columns: true
-
-      - name: Filter Rhino Sightings
-        id: process_rhino
+      - name: Flatten Rhino Sightings
+        id: rhino_obs_long
         task: apply_sql_query
         partial:
-          df: ${{ workflow.normalize_attrs.return }}
-          columns:
-            - uuid
-            - event_type
-            - X
-            - Y
-            - time
-            - geometry
-            - "extracted_attributes__Rhino Name"
+          df: ${{ workflow.filter_event_coords.return }}
+          sanitize: true          # event_details dict -> JSON string; json_each explodes it
+          columns: null
           query: >-
-            SELECT uuid, X, Y, time, geometry,
-              "extracted_attributes__Rhino Name" AS "Rhino Name"
-            FROM df
-            WHERE event_type = 'Rhino Direct Observation'
-              AND "extracted_attributes__Rhino Name" IS NOT NULL
-
-      # Phase 2: json_extract() stand-in (uncomment when using load_df)
-      # - name: Filter Rhino Sightings
-      #   id: process_rhino
-      #   task: apply_sql_query
-      #   partial:
-      #     df: ${{ workflow.convert_events_tz.return }}
-      #     columns:
-      #       - uuid
-      #       - event_type
-      #       - X
-      #       - Y
-      #       - time
-      #       - geometry
-      #       - extracted_attributes
-      #     query: >-
-      #       SELECT uuid, X, Y, time, geometry,
-      #         json_extract(extracted_attributes, '$."Rhino Name"') AS "Rhino Name"
-      #       FROM df
-      #       WHERE event_type = 'Rhino Direct Observation'
-      #         AND json_extract(extracted_attributes, '$."Rhino Name"') IS NOT NULL
+            SELECT * FROM (
+              SELECT df.id AS event_id, df.serial_number, df.time, df.geometry,
+                COALESCE(json_extract(j.value, '$."Bull"'), json_extract(j.value, '$."Kifaru ID"')) AS "Rhino Name",
+                COALESCE(json_extract(j.value, '$."Sighting"'), 'Unknown') AS "Sighting Method"
+              FROM df, json_each(COALESCE(json_extract(df.event_details, '$."Sighting Details - Bulls"'), '[]')) AS j
+              UNION ALL
+              SELECT df.id AS event_id, df.serial_number, df.time, df.geometry,
+                COALESCE(json_extract(j.value, '$."Known Cows"'), json_extract(j.value, '$."Kifaru ID"')) AS "Rhino Name",
+                COALESCE(json_extract(j.value, '$."Sighting"'), 'Unknown') AS "Sighting Method"
+              FROM df, json_each(COALESCE(json_extract(df.event_details, '$."Sighting Details - Cows"'), '[]')) AS j
+              UNION ALL
+              SELECT df.id AS event_id, df.serial_number, df.time, df.geometry,
+                COALESCE(json_extract(j.value, '$."Unsexed Individual(s)"'), json_extract(j.value, '$."Kifaru ID"')) AS "Rhino Name",
+                COALESCE(json_extract(j.value, '$."Sighting"'), 'Unknown') AS "Sighting Method"
+              FROM df, json_each(COALESCE(json_extract(df.event_details, '$."Sighting Details - Unsexed Individuals"'), '[]')) AS j
+            ) WHERE "Rhino Name" IS NOT NULL
 
       - name: Rhino Sighting Colormap
         id: rhino_colormap
         task: apply_color_map
         partial:
-          df: ${{ workflow.process_rhino.return }}
+          df: ${{ workflow.rhino_obs_long.return }}
           input_column_name: "Rhino Name"
           output_column_name: "rhino_colormap"
-          colormap: "Dark2"
+          colormap: "tab20b"      # ~90 known individuals; 20 colors cycle
 
-  # Data Exports
+  # ── Exports ────────────────────────────────────────────
   - name: Persist Patrol Trajectories
     id: persist_patrol_traj
     task: persist_df_wrapper
     partial:
-      df: ${{ workflow.filter_rhino_patrols.return }}
+      df: ${{ workflow.cleanup_traj_cols.return }}
       root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
       filename_prefix: "rhino_patrol_trajectories"
       filetypes: ["parquet"]
@@ -281,7 +321,7 @@ workflow:
     id: persist_rhino_obs
     task: persist_df_wrapper
     partial:
-      df: ${{ workflow.process_rhino.return }}
+      df: ${{ workflow.rhino_obs_long.return }}
       root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
       filename_prefix: "rhino_observations"
       filetypes: ["parquet"]
@@ -290,37 +330,44 @@ workflow:
       conditions:
         - never
 
-  # Map Settings
   - name: Base Maps
     id: base_map_defs
     task: set_base_maps
 
-  # Patrol Map
-  - title: Patrol Map
+  # ── Mara Triangle Patrol Map ───────────────────────────
+  - title: Mara Triangle Patrol Map
     type: task-group
-    description: "Generate patrol trajectory map."
+    description: "Trajectory map for Mara Triangle rhino monitoring patrols."
     tasks:
-      - name: Set Patrol Map Title
-        id: set_patrol_map_title
+      - name: Set Triangle Map Title
+        id: set_tri_map_title
         task: set_string_var
         partial:
-          var: "Rhino Patrol Trajectories"
+          var: "Mara Triangle Rhino Patrols"
 
-      - name: Rename Trajectory Columns for Display
-        id: rename_traj_cols
-        task: map_columns
+      - name: Filter Triangle Trajectories
+        id: filter_tri_traj
+        task: filter_row_values
         partial:
           df: ${{ workflow.patrol_colormap.return }}
+          column: "patrol_type"
+          values: ["rhino_monitoring_patrol", "rhino_monitoring_vehicle_patrol"]
+
+      - name: Rename Triangle Display Columns
+        id: rename_tri_cols
+        task: map_columns
+        partial:
+          df: ${{ workflow.filter_tri_traj.return }}
+          drop_columns: []
+          retain_columns: []
+          raise_if_not_found: false
           rename_columns:
             segment_start: "Start Time"
             timespan_seconds: "Duration (s)"
             speed_kmhr: "Speed (kph)"
-          drop_columns: []
-          retain_columns: []
-          raise_if_not_found: false
 
-      - name: Create Patrol Polyline Layer
-        id: patrol_polyline
+      - name: Create Triangle Polyline Layer
+        id: tri_polyline
         task: create_polyline_layer
         skipif:
           conditions:
@@ -328,60 +375,151 @@ workflow:
             - any_dependency_skipped
             - all_geometry_are_none
         partial:
-          geodataframe: ${{ workflow.rename_traj_cols.return }}
+          geodataframe: ${{ workflow.rename_tri_cols.return }}
           layer_style:
             get_width: 3
             width_units: "pixels"
             color_column: "patrol_colormap"
           legend:
-            label_column: "station"
+            label_column: "patrol_type_display"
             color_column: "patrol_colormap"
           tooltip_columns: ["Start Time", "Duration (s)", "Speed (kph)"]
 
-      - name: Draw Patrol Ecomap
-        id: patrol_ecomap
+      - name: Draw Triangle Ecomap
+        id: tri_ecomap
         task: draw_ecomap
         partial:
-          geo_layers: ${{ workflow.patrol_polyline.return }}
+          geo_layers: ${{ workflow.tri_polyline.return }}
           tile_layers: ${{ workflow.base_map_defs.return }}
           north_arrow_style:
             placement: "top-left"
           legend_style:
-            title: "Station"
+            title: "Patrol Type"
             placement: "bottom-right"
           static: false
           title: null
           max_zoom: 20
 
-      - name: Persist Patrol Ecomap
-        id: persist_patrol_ecomap
+      - name: Persist Triangle Ecomap
+        id: persist_tri_ecomap
         task: persist_text
         partial:
-          text: ${{ workflow.patrol_ecomap.return }}
+          text: ${{ workflow.tri_ecomap.return }}
           root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
-          filename_suffix: "patrol_map"
+          filename_suffix: "triangle_patrol_map"
 
-      - name: Create Patrol Map Widget
-        id: patrol_map_widget
+      - name: Create Triangle Map Widget
+        id: tri_map_widget
         task: create_map_widget_single_view
         skipif:
           conditions:
             - never
         partial:
-          title: ${{ workflow.set_patrol_map_title.return }}
-          data: ${{ workflow.persist_patrol_ecomap.return }}
+          title: ${{ workflow.set_tri_map_title.return }}
+          data: ${{ workflow.persist_tri_ecomap.return }}
 
-      - name: Merge Patrol Map Widget
-        id: merged_patrol_map
+      - name: Merge Triangle Map Widget
+        id: merged_tri_map
         task: merge_widget_views
         partial:
           widgets:
-            - ${{ workflow.patrol_map_widget.return }}
+            - ${{ workflow.tri_map_widget.return }}
 
-  # Rhino Sighting Map
+  # ── Reserve Patrol Map ─────────────────────────────────
+  - title: Reserve Patrol Map
+    type: task-group
+    description: "Trajectory map for National Reserve rhino monitoring patrols."
+    tasks:
+      - name: Set Reserve Map Title
+        id: set_res_map_title
+        task: set_string_var
+        partial:
+          var: "Reserve Rhino Patrols"
+
+      - name: Filter Reserve Trajectories
+        id: filter_res_traj
+        task: filter_row_values
+        partial:
+          df: ${{ workflow.patrol_colormap.return }}
+          column: "patrol_type"
+          values: ["rhino_monitor_patrol_reserve", "rhino_monitoring_veh_patrol_reserve"]
+
+      - name: Rename Reserve Display Columns
+        id: rename_res_cols
+        task: map_columns
+        partial:
+          df: ${{ workflow.filter_res_traj.return }}
+          drop_columns: []
+          retain_columns: []
+          raise_if_not_found: false
+          rename_columns:
+            segment_start: "Start Time"
+            timespan_seconds: "Duration (s)"
+            speed_kmhr: "Speed (kph)"
+
+      - name: Create Reserve Polyline Layer
+        id: res_polyline
+        task: create_polyline_layer
+        skipif:
+          conditions:
+            - any_is_empty_df
+            - any_dependency_skipped
+            - all_geometry_are_none
+        partial:
+          geodataframe: ${{ workflow.rename_res_cols.return }}
+          layer_style:
+            get_width: 3
+            width_units: "pixels"
+            color_column: "patrol_colormap"
+          legend:
+            label_column: "patrol_type_display"
+            color_column: "patrol_colormap"
+          tooltip_columns: ["Start Time", "Duration (s)", "Speed (kph)"]
+
+      - name: Draw Reserve Ecomap
+        id: res_ecomap
+        task: draw_ecomap
+        partial:
+          geo_layers: ${{ workflow.res_polyline.return }}
+          tile_layers: ${{ workflow.base_map_defs.return }}
+          north_arrow_style:
+            placement: "top-left"
+          legend_style:
+            title: "Patrol Type"
+            placement: "bottom-right"
+          static: false
+          title: null
+          max_zoom: 20
+
+      - name: Persist Reserve Ecomap
+        id: persist_res_ecomap
+        task: persist_text
+        partial:
+          text: ${{ workflow.res_ecomap.return }}
+          root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
+          filename_suffix: "reserve_patrol_map"
+
+      - name: Create Reserve Map Widget
+        id: res_map_widget
+        task: create_map_widget_single_view
+        skipif:
+          conditions:
+            - never
+        partial:
+          title: ${{ workflow.set_res_map_title.return }}
+          data: ${{ workflow.persist_res_ecomap.return }}
+
+      - name: Merge Reserve Map Widget
+        id: merged_res_map
+        task: merge_widget_views
+        partial:
+          widgets:
+            - ${{ workflow.res_map_widget.return }}
+
+  # ── Rhino Sightings Map ────────────────────────────────
   - title: Rhino Map
     type: task-group
-    description: "Generate rhino sighting point map."
+    description: "Point map of individual rhino sightings."
     tasks:
       - name: Set Rhino Map Title
         id: set_rhino_map_title
@@ -405,7 +543,7 @@ workflow:
           legend:
             label_column: "Rhino Name"
             color_column: "rhino_colormap"
-          tooltip_columns: ["Rhino Name", "time"]
+          tooltip_columns: ["Rhino Name", "Sighting Method", "time"]
 
       - name: Draw Rhino Ecomap
         id: rhino_ecomap
@@ -416,7 +554,7 @@ workflow:
           north_arrow_style:
             placement: "top-left"
           legend_style:
-            title: "Rhino Name"
+            title: "Rhino"
             placement: "bottom-right"
           static: false
           title: null
@@ -447,22 +585,54 @@ workflow:
           widgets:
             - ${{ workflow.rhino_map_widget.return }}
 
-  # Rhino Summary & Bar Chart
+  # ── Summary Table & Stacked Bar ────────────────────────
   - title: Summary and Chart
     type: task-group
-    description: "Summarize rhino sightings and generate bar chart."
+    description: "Per-rhino sighting counts by method: summary table and stacked bar chart."
     tasks:
-      - name: Summarize Rhino Sightings
-        id: rhino_summary
+      - name: Count Sightings by Rhino and Method
+        id: method_counts
         task: summarize_df
         partial:
-          df: ${{ workflow.process_rhino.return }}
-          groupby_cols: ["Rhino Name"]
+          df: ${{ workflow.rhino_obs_long.return }}
+          groupby_cols: ["Rhino Name", "Sighting Method"]
           reset_index: true
           summary_params:
             - display_name: "Count"
               aggregator: count
-              column: uuid
+              column: event_id
+
+      - name: Pivot Methods to Columns
+        id: method_pivot
+        task: pivot_dataframe
+        partial:
+          df: ${{ workflow.method_counts.return }}
+          index: "Rhino Name"
+          columns: "Sighting Method"
+          values: "Count"
+          fill_value: 0
+
+      - name: Total Sightings per Rhino
+        id: rhino_totals
+        task: summarize_df
+        partial:
+          df: ${{ workflow.rhino_obs_long.return }}
+          groupby_cols: ["Rhino Name"]
+          reset_index: true
+          summary_params:
+            - display_name: "Total"
+              aggregator: count
+              column: event_id
+
+      - name: Merge Summary Columns
+        id: rhino_summary
+        task: merge_two_dataframes
+        partial:
+          left: ${{ workflow.method_pivot.return }}
+          right: ${{ workflow.rhino_totals.return }}
+          how: "left"
+          on: "Rhino Name"
+          fillna_value: 0
 
       - name: Persist Rhino Summary
         id: persist_summary
@@ -488,7 +658,7 @@ workflow:
         task: draw_table
         partial:
           dataframe: ${{ workflow.rhino_summary.return }}
-          columns: ["Rhino Name", "Count"]
+          columns: null
           table_config:
             enable_sorting: true
             enable_filtering: true
@@ -524,22 +694,28 @@ workflow:
         id: set_bar_title
         task: set_string_var
         partial:
-          var: "Rhino Sighting Counts"
+          var: "Rhino Sightings by Method"
 
-      - name: Draw Rhino Bar Chart
+      - name: Draw Stacked Bar Chart
         id: rhino_bar
-        task: draw_bar_chart
+        task: draw_chart      # generalized: no time_interval -> categorical x axis
         partial:
-          dataframe: ${{ workflow.rhino_summary.return }}
-          category: "Rhino Name"
-          layout_kwargs: null
-          bar_chart_configs:
-            - label: "Count of Sightings"
-              column: "Count"
-              agg_func: "sum"
-              show_label: true
-              style:
-                marker_color: "#35b779"
+          dataframe: ${{ workflow.rhino_obs_long.return }}
+          x_axis: "Rhino Name"
+          figures:
+            - metric:
+                display_name: "Sightings"
+                aggregator: count
+                column: event_id
+              chart_type: "bar"
+          category: "Sighting Method"
+          barmode: "stack"
+          palette: "Dark2"
+          layout_style:
+            showlegend: true
+            legend_title: "Sighting Method"
+            yaxis:
+              title: "Sightings"
 
       - name: Persist Bar Chart
         id: persist_bar
@@ -566,10 +742,13 @@ workflow:
           widgets:
             - ${{ workflow.bar_widget.return }}
 
-  # Report
+  # ── Report & Dashboard ─────────────────────────────────
   - name: Create Rhino Report
     id: rhino_report
-    task: ecoscope_workflows_ext_custom.tasks.results.create_docx
+    task: create_docx
+    skipif:
+      conditions:
+        - never
     partial:
       context:
         items:
@@ -578,8 +757,15 @@ workflow:
             value: ${{ workflow.time_range.return }}
             format: "%b %Y"
           - item_type: image
-            key: patrol_map
-            value: ${{ workflow.persist_patrol_ecomap.return }}
+            key: patrol_map_triangle
+            value: ${{ workflow.persist_tri_ecomap.return }}
+            screenshot_config:
+              wait_for_timeout: 20000
+              max_concurrent_pages: 2
+              device_scale_factor: 1.0
+          - item_type: image
+            key: patrol_map_reserve
+            value: ${{ workflow.persist_res_ecomap.return }}
             screenshot_config:
               wait_for_timeout: 20000
               max_concurrent_pages: 2
@@ -603,18 +789,15 @@ workflow:
       groupers: []
       output_dir: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
       filename_prefix: mt_rhino_report
-    skipif:
-      conditions:
-        - never
 
-  # Dashboard
   - name: Create Dashboard
     id: dashboard
     task: gather_dashboard
     partial:
       details: ${{ workflow.workflow_details.return }}
       widgets:
-        - ${{ workflow.merged_patrol_map.return }}
+        - ${{ workflow.merged_tri_map.return }}
+        - ${{ workflow.merged_res_map.return }}
         - ${{ workflow.merged_rhino_map.return }}
         - ${{ workflow.merged_table_widget.return }}
         - ${{ workflow.merged_bar_widget.return }}
