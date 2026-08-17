@@ -206,4 +206,22 @@ processed.to_parquet(OUT_DIR / "process-events-details-rhino.example-return.parq
 
 n_individuals = sum(len(v) for d in details for v in d.values())
 print(f"patrols: {len(patrols_df)}, obs: {len(obs)}, events: {len(events)}, individuals: {n_individuals}")
+
+# Zero-row variants (schema preserved) for manual empty-month/skipif testing.
+# Not wired to a committed test case: create_docx rejects SkipSentinel for
+# direct context items, so a full empty run fails at rhino_report (see
+# test-cases.yaml note).
+for stem in [
+    "get-patrols-rhino",
+    "patrol-obs-rhino",
+    "get-events-rhino",
+    "process-events-details-rhino",
+]:
+    src = OUT_DIR / f"{stem}.example-return.parquet"
+    try:
+        full = gpd.read_parquet(src)
+    except ValueError:
+        full = pd.read_parquet(src)
+    full.iloc[0:0].to_parquet(OUT_DIR / f"{stem}-empty.example-return.parquet", index=False)
+
 print(f"wrote fixtures to {OUT_DIR}")

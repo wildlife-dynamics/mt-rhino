@@ -33,6 +33,15 @@ mock:
     rhino_report:
       template_path: "/Users/yunwu/MEP/wt-workflows/mt-rhino/resources/templates/mt_rhino_report_template.docx"  # local while template changes are unmerged; publish flow restores the raw URL
 
+# NOTE: no empty-data test case. Zero-row fixtures exist
+# (dev/fixtures/*-empty.example-return.parquet) and everything up to the
+# report behaves (skips cascade, widget tasks emit placeholders, empty
+# exports are written), but create_docx cannot accept SkipSentinel for
+# direct (ungrouped) image/table context items, so the run fails at
+# rhino_report on an empty month. Same latent behavior as the SMART-era
+# spec. Fixing it needs an ext-custom change (drop skipped direct context
+# items) — tracked as a follow-up task gap.
+
 base:
   name: Mara Triangle Rhino Report
   mock_io: false

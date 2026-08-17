@@ -756,12 +756,12 @@ workflow:
             - ${{ workflow.bar_widget.return }}
 
   # ── Report & Dashboard ─────────────────────────────────
+  # No `skipif: never` here: create_docx cannot accept SkipSentinel for
+  # direct image/table items, so on empty data the report skips (platform
+  # precedent — same as mt-patrols and the SMART-era spec).
   - name: Create Rhino Report
     id: rhino_report
     task: create_docx
-    skipif:
-      conditions:
-        - never
     partial:
       context:
         items:
