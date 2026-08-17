@@ -31,7 +31,7 @@ mock:
         - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
           opacity: 1
     rhino_report:
-      template_path: "https://raw.githubusercontent.com/wildlife-dynamics/mt-rhino/main/resources/templates/mt_rhino_report_template.docx"
+      template_path: "/Users/yunwu/MEP/wt-workflows/mt-rhino/resources/templates/mt_rhino_report_template.docx"  # local while template changes are unmerged; publish flow restores the raw URL
 
 base:
   name: Mara Triangle Rhino Report
@@ -56,4 +56,4 @@ base:
         - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
           opacity: 1
     rhino_report:
-      template_path: "https://raw.githubusercontent.com/wildlife-dynamics/mt-rhino/main/resources/templates/mt_rhino_report_template.docx"
+      template_path: "/Users/yunwu/MEP/wt-workflows/mt-rhino/resources/templates/mt_rhino_report_template.docx"  # local while template changes are unmerged; publish flow restores the raw URL
