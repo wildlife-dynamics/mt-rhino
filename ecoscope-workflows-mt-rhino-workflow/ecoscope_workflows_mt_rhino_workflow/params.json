@@ -294,13 +294,6 @@
           "title": "Template Path",
           "type": "string",
           "description": "Path or URL to the Word template (.docx) file with Jinja2 placeholders. Supports local paths and remote URLs (http://, https://)."
-        },
-        "skip": {
-          "default": false,
-          "title": "Skip",
-          "type": "boolean",
-          "description": "Skip report generation entirely when True.",
-          "ecoscope:advanced": true
         }
       },
       "required": [
@@ -413,12 +406,6 @@
         "since",
         "until",
         "timezone"
-      ]
-    },
-    "rhino_report": {
-      "ui:order": [
-        "template_path",
-        "skip"
       ]
     },
     "ui:order": [

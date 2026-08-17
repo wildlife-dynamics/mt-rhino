@@ -41,6 +41,16 @@ get_patrol_observations_from_patrols_df_and_combined_params = (
         func_name="get_patrol_observations_from_patrols_df_and_combined_params",  # 🧪
     )
 )  # 🧪
+
+get_events = create_func_magicmock(  # 🧪
+    anchor="ecoscope.platform.tasks.io",  # 🧪
+    func_name="get_events",  # 🧪
+)  # 🧪
+
+process_events_details = create_func_magicmock(  # 🧪
+    anchor="ecoscope.platform.tasks.io",  # 🧪
+    func_name="process_events_details",  # 🧪
+)  # 🧪
 from ecoscope.platform.tasks.preprocessing import (
     relocations_to_trajectory as relocations_to_trajectory,
 )
@@ -48,13 +58,24 @@ from ecoscope.platform.tasks.transformation import apply_color_map as apply_colo
 from ecoscope.platform.tasks.transformation import (
     apply_reloc_coord_filter as apply_reloc_coord_filter,
 )
+from ecoscope.platform.tasks.transformation import apply_sql_query as apply_sql_query
 from ecoscope.platform.tasks.transformation import (
     convert_values_to_timezone as convert_values_to_timezone,
 )
 from ecoscope.platform.tasks.transformation import (
     drop_column_prefix as drop_column_prefix,
 )
+from ecoscope.platform.tasks.transformation import explode as explode
+from ecoscope.platform.tasks.transformation import (
+    extract_value_from_json_column as extract_value_from_json_column,
+)
 from ecoscope.platform.tasks.transformation import map_columns as map_columns
+from ecoscope_workflows_ext_custom.tasks.transformation import (
+    filter_row_values as filter_row_values,
+)
+from ecoscope_workflows_ext_custom.tasks.transformation import (
+    merge_two_dataframes as merge_two_dataframes,
+)
 
 get_events = create_func_magicmock(  # 🧪
     anchor="ecoscope.platform.tasks.io",  # 🧪
@@ -90,14 +111,7 @@ from ecoscope.platform.tasks.results import merge_widget_views as merge_widget_v
 from ecoscope.platform.tasks.results import set_base_maps as set_base_maps
 from ecoscope.platform.tasks.skip import all_geometry_are_none as all_geometry_are_none
 from ecoscope.platform.tasks.skip import never as never
-from ecoscope.platform.tasks.transformation import apply_sql_query as apply_sql_query
 from ecoscope_workflows_ext_custom.tasks.results import create_docx as create_docx
-from ecoscope_workflows_ext_custom.tasks.transformation import (
-    filter_row_values as filter_row_values,
-)
-from ecoscope_workflows_ext_custom.tasks.transformation import (
-    merge_two_dataframes as merge_two_dataframes,
-)
 from ecoscope_workflows_ext_custom.tasks.transformation import (
     pivot_dataframe as pivot_dataframe,
 )
@@ -248,6 +262,198 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             patrols_df=prefetch_patrols,
             combined_params=er_patrol_params,
             **(params.get("patrol_obs") or {}),
+        )
+        .call()
+    )
+
+    patrol_info_raw = (
+        task(get_events)
+        # 🧪 validation omitted for mocked IO task (returns pre-loaded example data)
+        .set_task_instance_id("patrol_info_raw")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            client=er_client_name,
+            time_range=time_range,
+            event_types=["patrol_information"],
+            event_columns=None,
+            include_null_geometry=True,
+            raise_on_empty=False,
+            include_details=True,
+            include_updates=False,
+            include_related_events=False,
+            include_display_values=False,
+            force_point_geometry=True,
+            **(params.get("patrol_info_raw") or {}),
+        )
+        .call()
+    )
+
+    patrol_info_events = (
+        task(process_events_details)
+        # 🧪 validation omitted for mocked IO task (returns pre-loaded example data)
+        .set_task_instance_id("patrol_info_events")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=patrol_info_raw,
+            client=er_client_name,
+            map_to_titles=True,
+            ordered=True,
+            **(params.get("patrol_info_events") or {}),
+        )
+        .call()
+    )
+
+    patrol_info_only = (
+        task(filter_row_values)
+        .validate()
+        .set_task_instance_id("patrol_info_only")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=patrol_info_events,
+            column="event_type",
+            values=["patrol_information"],
+            **(params.get("patrol_info_only") or {}),
+        )
+        .call()
+    )
+
+    explode_event_patrols = (
+        task(explode)
+        .validate()
+        .set_task_instance_id("explode_event_patrols")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=patrol_info_only,
+            column_name="patrols",
+            ignore_index=True,
+            **(params.get("explode_event_patrols") or {}),
+        )
+        .call()
+    )
+
+    event_patrol_id = (
+        task(map_columns)
+        .validate()
+        .set_task_instance_id("event_patrol_id")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=explode_event_patrols,
+            rename_columns={"patrols": "patrol_id"},
+            drop_columns=[],
+            retain_columns=[],
+            raise_if_not_found=True,
+            **(params.get("event_patrol_id") or {}),
+        )
+        .call()
+    )
+
+    extract_team_name = (
+        task(extract_value_from_json_column)
+        .validate()
+        .set_task_instance_id("extract_team_name")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=event_patrol_id,
+            column_name="event_details",
+            field_name_options=["Team name", "Team_name"],
+            output_type="str",
+            output_column_name="team_name",
+            **(params.get("extract_team_name") or {}),
+        )
+        .call()
+    )
+
+    patrol_attribute_columns = (
+        task(map_columns)
+        .validate()
+        .set_task_instance_id("patrol_attribute_columns")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=extract_team_name,
+            rename_columns={},
+            drop_columns=[],
+            retain_columns=["patrol_id", "team_name"],
+            raise_if_not_found=False,
+            **(params.get("patrol_attribute_columns") or {}),
+        )
+        .call()
+    )
+
+    patrol_attributes = (
+        task(apply_sql_query)
+        .validate()
+        .set_task_instance_id("patrol_attributes")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=patrol_attribute_columns,
+            query="SELECT patrol_id, MAX(team_name) AS team_name FROM df GROUP BY patrol_id\n",
+            columns=None,
+            sanitize=True,
+            **(params.get("patrol_attributes") or {}),
         )
         .call()
     )
@@ -420,6 +626,34 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .call()
     )
 
+    traj_with_attributes = (
+        task(merge_two_dataframes)
+        .validate()
+        .set_task_instance_id("traj_with_attributes")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            left=cleanup_traj_cols,
+            right=patrol_attributes,
+            how="left",
+            on="patrol_id",
+            left_on=None,
+            right_on=None,
+            left_index=False,
+            right_index=False,
+            fillna_value="Unknown",
+            **(params.get("traj_with_attributes") or {}),
+        )
+        .call()
+    )
+
     patrol_colormap = (
         task(apply_color_map)
         .validate()
@@ -434,10 +668,27 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            df=cleanup_traj_cols,
-            input_column_name="patrol_type_display",
-            output_column_name="patrol_colormap",
-            colormap="Dark2",
+            df=traj_with_attributes,
+            input_column_name="team_name",
+            output_column_name="team_colormap",
+            colormap=[
+                "#FF9600",
+                "#F23B0E",
+                "#A100CB",
+                "#F04564",
+                "#03421A",
+                "#3089FF",
+                "#E26FFF",
+                "#8C1700",
+                "#002960",
+                "#FFD000",
+                "#B62879",
+                "#680078",
+                "#005A56",
+                "#0056C7",
+                "#331878",
+                "#E76826",
+            ],
             **(params.get("patrol_colormap") or {}),
         )
         .call()
@@ -496,6 +747,28 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .call()
     )
 
+    rhino_events_only = (
+        task(filter_row_values)
+        .validate()
+        .set_task_instance_id("rhino_events_only")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=events_details,
+            column="event_type",
+            values=["black_rhino_sighting_v202310"],
+            **(params.get("rhino_events_only") or {}),
+        )
+        .call()
+    )
+
     convert_events_tz = (
         task(convert_values_to_timezone)
         .validate()
@@ -510,7 +783,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            df=events_details,
+            df=rhino_events_only,
             timezone=get_timezone,
             columns=["time"],
             **(params.get("convert_events_tz") or {}),
@@ -611,7 +884,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            df=cleanup_traj_cols,
+            df=traj_with_attributes,
             root_path=os.environ["ECOSCOPE_WORKFLOWS_RESULTS"],
             filename_prefix="rhino_patrol_trajectories",
             filetypes=["parquet"],
@@ -724,6 +997,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
                 "segment_start": "Start Time",
                 "timespan_seconds": "Duration (s)",
                 "speed_kmhr": "Speed (kph)",
+                "team_name": "Team",
             },
             **(params.get("rename_tri_cols") or {}),
         )
@@ -749,13 +1023,10 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             layer_style={
                 "get_width": 3,
                 "width_units": "pixels",
-                "color_column": "patrol_colormap",
+                "color_column": "team_colormap",
             },
-            legend={
-                "label_column": "patrol_type_display",
-                "color_column": "patrol_colormap",
-            },
-            tooltip_columns=["Start Time", "Duration (s)", "Speed (kph)"],
+            legend={"label_column": "Team", "color_column": "team_colormap"},
+            tooltip_columns=["Team", "Start Time", "Duration (s)", "Speed (kph)"],
             **(params.get("tri_polyline") or {}),
         )
         .call()
@@ -778,7 +1049,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             geo_layers=tri_polyline,
             tile_layers=base_map_defs,
             north_arrow_style={"placement": "top-left"},
-            legend_style={"title": "Patrol Type", "placement": "bottom-right"},
+            legend_style={"title": "Team", "placement": "bottom-right"},
             static=False,
             title=None,
             max_zoom=20,
@@ -910,6 +1181,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
                 "segment_start": "Start Time",
                 "timespan_seconds": "Duration (s)",
                 "speed_kmhr": "Speed (kph)",
+                "team_name": "Team",
             },
             **(params.get("rename_res_cols") or {}),
         )
@@ -935,13 +1207,10 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             layer_style={
                 "get_width": 3,
                 "width_units": "pixels",
-                "color_column": "patrol_colormap",
+                "color_column": "team_colormap",
             },
-            legend={
-                "label_column": "patrol_type_display",
-                "color_column": "patrol_colormap",
-            },
-            tooltip_columns=["Start Time", "Duration (s)", "Speed (kph)"],
+            legend={"label_column": "Team", "color_column": "team_colormap"},
+            tooltip_columns=["Team", "Start Time", "Duration (s)", "Speed (kph)"],
             **(params.get("res_polyline") or {}),
         )
         .call()
@@ -964,7 +1233,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             geo_layers=res_polyline,
             tile_layers=base_map_defs,
             north_arrow_style={"placement": "top-left"},
-            legend_style={"title": "Patrol Type", "placement": "bottom-right"},
+            legend_style={"title": "Team", "placement": "bottom-right"},
             static=False,
             title=None,
             max_zoom=20,
@@ -1516,6 +1785,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
+            skip=False,
             context={
                 "items": [
                     {

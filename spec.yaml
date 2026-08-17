@@ -135,6 +135,105 @@ workflow:
           patrols_df: ${{ workflow.prefetch_patrols.return }}
           combined_params: ${{ workflow.er_patrol_params.return }}
 
+      # patrol_information event_details are NOT present in the events nested
+      # in the patrols payload, so patrol events are fetched separately with
+      # get_events(include_details) and resolved by process_events_details
+      # (mt-patrols precedent).
+      - name: Get Patrol Info Events
+        id: patrol_info_raw
+        task: get_events
+        partial:
+          client: ${{ workflow.er_client_name.return }}
+          time_range: ${{ workflow.time_range.return }}
+          event_types: ["patrol_information"]
+          event_columns: null
+          include_null_geometry: true
+          raise_on_empty: false
+          include_details: true
+          include_updates: false
+          include_related_events: false
+          include_display_values: false
+          force_point_geometry: true
+
+      - name: Resolve Patrol Info Details
+        id: patrol_info_events
+        task: process_events_details
+        partial:
+          df: ${{ workflow.patrol_info_raw.return }}
+          client: ${{ workflow.er_client_name.return }}
+          map_to_titles: true
+          ordered: true
+
+      # No-op on live data (the fetch is already scoped); under mock_io the
+      # shared process_events_details fixture returns rhino sightings AND
+      # patrol_information rows combined, and this filter splits the branch.
+      - name: Keep Patrol Info Events Only
+        id: patrol_info_only
+        task: filter_row_values
+        partial:
+          df: ${{ workflow.patrol_info_events.return }}
+          column: "event_type"
+          values: ["patrol_information"]
+
+  - title: Patrol Attributes
+    type: task-group
+    description: "Extract the team name from patrol_information events."
+    tasks:
+      # Each patrol_information event links to its patrol via the `patrols`
+      # id list (always a single id) — explode to a scalar and rename.
+      - name: Explode Patrol Ids
+        id: explode_event_patrols
+        task: explode
+        partial:
+          df: ${{ workflow.patrol_info_only.return }}
+          column_name: "patrols"
+          ignore_index: true
+
+      - name: Rename Patrol Id Column
+        id: event_patrol_id
+        task: map_columns
+        partial:
+          df: ${{ workflow.explode_event_patrols.return }}
+          rename_columns:
+            patrols: "patrol_id"
+          drop_columns: []
+          retain_columns: []
+          raise_if_not_found: true
+
+      # field_name_options lead with the title-form key produced by
+      # process_events_details(map_to_titles=true); the raw schema key is the
+      # fallback in case details arrive unmapped.
+      - name: Extract Team Name
+        id: extract_team_name
+        task: extract_value_from_json_column
+        partial:
+          df: ${{ workflow.event_patrol_id.return }}
+          column_name: "event_details"
+          field_name_options: ["Team name", "Team_name"]
+          output_type: "str"
+          output_column_name: "team_name"
+
+      - name: Retain Attribute Columns
+        id: patrol_attribute_columns
+        task: map_columns
+        partial:
+          df: ${{ workflow.extract_team_name.return }}
+          rename_columns: {}
+          drop_columns: []
+          retain_columns: ["patrol_id", "team_name"]
+          raise_if_not_found: false
+
+      - name: Deduplicate Patrol Attributes
+        id: patrol_attributes
+        task: apply_sql_query
+        partial:
+          df: ${{ workflow.patrol_attribute_columns.return }}
+          query: >
+            SELECT patrol_id, MAX(team_name) AS team_name
+            FROM df GROUP BY patrol_id
+          columns: null
+          sanitize: true
+
   - name: Convert Patrol Observations to Timezone
     id: convert_patrols_tz
     task: convert_values_to_timezone
@@ -210,14 +309,29 @@ workflow:
           retain_columns: []
           raise_if_not_found: false
 
+      - name: Join Patrol Attributes
+        id: traj_with_attributes
+        task: merge_two_dataframes
+        partial:
+          left: ${{ workflow.cleanup_traj_cols.return }}
+          right: ${{ workflow.patrol_attributes.return }}
+          how: "left"
+          on: "patrol_id"
+          left_on: null
+          right_on: null
+          left_index: false
+          right_index: false
+          fillna_value: "Unknown"
+
+      # Same palette as mt-patrols so team colors match across workflows.
       - name: Patrol Trajectory Colormap
         id: patrol_colormap
         task: apply_color_map
         partial:
-          df: ${{ workflow.cleanup_traj_cols.return }}
-          input_column_name: "patrol_type_display"
-          output_column_name: "patrol_colormap"
-          colormap: "Dark2"
+          df: ${{ workflow.traj_with_attributes.return }}
+          input_column_name: "team_name"
+          output_column_name: "team_colormap"
+          colormap: ["#FF9600", "#F23B0E", "#A100CB", "#F04564", "#03421A", "#3089FF", "#E26FFF", "#8C1700", "#002960", "#FFD000", "#B62879", "#680078", "#005A56", "#0056C7", "#331878", "#E76826"]
 
   # ── Fetch & Process Rhino Sightings (EarthRanger) ──────
   - name: Get Rhino Sighting Events
@@ -245,11 +359,22 @@ workflow:
       map_to_titles: true
       ordered: true
 
+  # No-op on live data; under mock_io the shared process_events_details
+  # fixture returns rhino sightings AND patrol_information rows combined,
+  # and this filter splits the branch.
+  - name: Keep Rhino Sighting Events Only
+    id: rhino_events_only
+    task: filter_row_values
+    partial:
+      df: ${{ workflow.events_details.return }}
+      column: "event_type"
+      values: ["black_rhino_sighting_v202310"]
+
   - name: Convert Events to Timezone
     id: convert_events_tz
     task: convert_values_to_timezone
     partial:
-      df: ${{ workflow.events_details.return }}
+      df: ${{ workflow.rhino_events_only.return }}
       timezone: ${{ workflow.get_timezone.return }}
       columns: ["time"]
 
@@ -314,7 +439,7 @@ workflow:
     id: persist_patrol_traj
     task: persist_df_wrapper
     partial:
-      df: ${{ workflow.cleanup_traj_cols.return }}
+      df: ${{ workflow.traj_with_attributes.return }}
       root_path: ${{ env.ECOSCOPE_WORKFLOWS_RESULTS }}
       filename_prefix: "rhino_patrol_trajectories"
       filetypes: ["parquet"]
@@ -371,6 +496,7 @@ workflow:
             segment_start: "Start Time"
             timespan_seconds: "Duration (s)"
             speed_kmhr: "Speed (kph)"
+            team_name: "Team"
 
       - name: Create Triangle Polyline Layer
         id: tri_polyline
@@ -385,11 +511,11 @@ workflow:
           layer_style:
             get_width: 3
             width_units: "pixels"
-            color_column: "patrol_colormap"
+            color_column: "team_colormap"
           legend:
-            label_column: "patrol_type_display"
-            color_column: "patrol_colormap"
-          tooltip_columns: ["Start Time", "Duration (s)", "Speed (kph)"]
+            label_column: "Team"
+            color_column: "team_colormap"
+          tooltip_columns: ["Team", "Start Time", "Duration (s)", "Speed (kph)"]
 
       - name: Draw Triangle Ecomap
         id: tri_ecomap
@@ -400,7 +526,7 @@ workflow:
           north_arrow_style:
             placement: "top-left"
           legend_style:
-            title: "Patrol Type"
+            title: "Team"
             placement: "bottom-right"
           static: false
           title: null
@@ -462,6 +588,7 @@ workflow:
             segment_start: "Start Time"
             timespan_seconds: "Duration (s)"
             speed_kmhr: "Speed (kph)"
+            team_name: "Team"
 
       - name: Create Reserve Polyline Layer
         id: res_polyline
@@ -476,11 +603,11 @@ workflow:
           layer_style:
             get_width: 3
             width_units: "pixels"
-            color_column: "patrol_colormap"
+            color_column: "team_colormap"
           legend:
-            label_column: "patrol_type_display"
-            color_column: "patrol_colormap"
-          tooltip_columns: ["Start Time", "Duration (s)", "Speed (kph)"]
+            label_column: "Team"
+            color_column: "team_colormap"
+          tooltip_columns: ["Team", "Start Time", "Duration (s)", "Speed (kph)"]
 
       - name: Draw Reserve Ecomap
         id: res_ecomap
@@ -491,7 +618,7 @@ workflow:
           north_arrow_style:
             placement: "top-left"
           legend_style:
-            title: "Patrol Type"
+            title: "Team"
             placement: "bottom-right"
           static: false
           title: null
@@ -763,6 +890,7 @@ workflow:
     id: rhino_report
     task: create_docx
     partial:
+      skip: false           # bound so the Skip toggle stays off the form
       context:
         items:
           - item_type: timerange

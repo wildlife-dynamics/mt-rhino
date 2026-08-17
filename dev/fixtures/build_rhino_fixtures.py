@@ -48,6 +48,7 @@ PATROL_TYPES = [
     ("rhino_monitoring_veh_patrol_reserve", "Rhino Monitoring - Vehicle (Reserve)", "reserve"),
 ]
 RANGERS = [f"Ranger {i:02d}" for i in range(1, 7)]
+TEAMS = {"triangle": ["Team Alpha", "Team Bravo"], "reserve": ["Team Charlie", "Team Delta"]}
 
 # Fully synthetic rhino roster: 9xxx Kifaru IDs, made-up names
 BULLS = [("9001", "9001 - BOULDER"), ("9002", "9002 - GRANITE"), ("9003", "9003 - FLINT")]
@@ -68,7 +69,7 @@ def pick_method() -> str:
 
 
 # ── Patrol fixtures ─────────────────────────────────────────────────────
-patrol_rows, obs_frames = [], []
+patrol_rows, obs_frames, info_specs = [], [], []
 serial = 2000
 for rep in range(3):  # 3 patrols per type across Jul 2026
     for k, (slug, display, area) in enumerate(PATROL_TYPES):
@@ -96,6 +97,19 @@ for rep in range(3):  # 3 patrols per type across Jul 2026
         lons = np.clip(lon + steps[:, 0], LON0, LON1)
         lats = np.clip(lat + steps[:, 1], LAT0, LAT1)
         times = pd.date_range(start, periods=n_pts, freq="60s", tz="UTC")
+        # two patrols deliberately get NO patrol_information event to
+        # exercise the "Unknown" team fallback after the attributes merge
+        if serial % 6 != 0:
+            info_specs.append(
+                {
+                    "patrol_id": patrol_id,
+                    "serial": serial,
+                    "team": TEAMS[area][serial % 2],
+                    "ranger": ranger,
+                    "start": start,
+                    "point": Point(float(lons[0]), float(lats[0])),
+                }
+            )
         obs_frames.append(
             gpd.GeoDataFrame(
                 {
@@ -197,15 +211,51 @@ events_df = events_df.reset_index(drop=True)
 events = gpd.GeoDataFrame(events_df, geometry="geometry", crs="EPSG:4326")
 events.to_parquet(OUT_DIR / "get-events-rhino.example-return.parquet", index=False)
 
-# process_events_details mock: same rows, drop `reported_by`, add the columns
-# this task contributes (title-mapped event_details, reported_by_name)
+# process_events_details mock: COMBINED rhino sightings + patrol_information
+# rows. Both process_events_details instances (rhino branch and patrol-info
+# branch) share one mock key, so each branch filters on event_type after it.
+# Rhino rows: drop `reported_by`, add the columns the task contributes
+# (title-mapped event_details, reported_by_name). Patrol-info rows: team
+# details plus the `patrols` id-list linkage (native arrow list so explode
+# works after the parquet round-trip).
 processed = events.drop(columns=["reported_by"]).copy()
 processed["event_details"] = details
 processed["reported_by_name"] = "Ranger 01"
-processed.to_parquet(OUT_DIR / "process-events-details-rhino.example-return.parquet", index=False)
+processed["patrols"] = None
+
+info_rows, info_details = [], []
+for spec in info_specs:
+    info_rows.append(
+        {
+            "id": fake_id(f"info-event/{spec['serial']}"),
+            "time": spec["start"] + pd.Timedelta(minutes=5),
+            "event_type": "patrol_information",
+            "event_category": "patrols",
+            "title": "Patrol information",
+            "priority": 0,
+            "priority_label": "Gray",
+            "state": "resolved",
+            "geometry": spec["point"],
+            "serial_number": 95000 + spec["serial"],
+            "event_type_display": "Patrol information",
+            "reported_by_name": spec["ranger"],
+            "patrols": [spec["patrol_id"]],
+        }
+    )
+    info_details.append({"Team name": spec["team"], "Patrol leader": spec["ranger"]})
+
+info_gdf = gpd.GeoDataFrame(pd.DataFrame(info_rows), geometry="geometry", crs="EPSG:4326")
+info_gdf["event_details"] = info_details
+
+combined = pd.concat([processed, info_gdf], ignore_index=True)
+combined = gpd.GeoDataFrame(combined, geometry="geometry", crs="EPSG:4326")
+combined.to_parquet(OUT_DIR / "process-events-details-rhino.example-return.parquet", index=False)
 
 n_individuals = sum(len(v) for d in details for v in d.values())
-print(f"patrols: {len(patrols_df)}, obs: {len(obs)}, events: {len(events)}, individuals: {n_individuals}")
+print(
+    f"patrols: {len(patrols_df)}, obs: {len(obs)}, events: {len(events)}, "
+    f"individuals: {n_individuals}, patrol-info events: {len(info_rows)}"
+)
 
 # Zero-row variants (schema preserved) for manual empty-month/skipif testing.
 # Not wired to a committed test case: create_docx rejects SkipSentinel for

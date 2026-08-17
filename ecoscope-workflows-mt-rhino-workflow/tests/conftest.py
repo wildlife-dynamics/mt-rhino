@@ -46,6 +46,8 @@ IO_TASKS_IMPORTABLE_REFERENCES = [
     "ecoscope.platform.tasks.io.get_patrol_observations_from_patrols_df_and_combined_params",
     "ecoscope.platform.tasks.io.get_events",
     "ecoscope.platform.tasks.io.process_events_details",
+    "ecoscope.platform.tasks.io.get_events",
+    "ecoscope.platform.tasks.io.process_events_details",
 ]
 
 yaml = ruamel.yaml.YAML(typ="safe")
