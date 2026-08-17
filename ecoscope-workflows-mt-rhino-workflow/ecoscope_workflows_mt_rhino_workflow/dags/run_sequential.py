@@ -1224,6 +1224,10 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             right=rhino_totals,
             how="left",
             on="Rhino Name",
+            left_on=None,
+            right_on=None,
+            left_index=False,
+            right_index=False,
             fillna_value=0,
             **(params.get("rhino_summary") or {}),
         )
@@ -1399,9 +1403,12 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
                     "chart_type": "bar",
                 }
             ],
+            time_interval=None,
             category="Sighting Method",
+            time_breakdown=None,
             barmode="stack",
             palette="Dark2",
+            plot_style=None,
             layout_style={
                 "showlegend": True,
                 "legend_title": "Sighting Method",

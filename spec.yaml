@@ -638,6 +638,10 @@ workflow:
           right: ${{ workflow.rhino_totals.return }}
           how: "left"
           on: "Rhino Name"
+          left_on: null
+          right_on: null
+          left_index: false
+          right_index: false
           fillna_value: 0
 
       - name: Persist Rhino Summary
@@ -714,9 +718,12 @@ workflow:
                 aggregator: count
                 column: event_id
               chart_type: "bar"
+          time_interval: null   # no time bucketing: raw x_axis values -> categorical x
           category: "Sighting Method"
+          time_breakdown: null
           barmode: "stack"
           palette: "Dark2"
+          plot_style: null
           layout_style:
             showlegend: true
             legend_title: "Sighting Method"
