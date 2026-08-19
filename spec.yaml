@@ -178,6 +178,9 @@ workflow:
           field_name_options: ["Team name", "Team_name"]
           output_type: "str"
           output_column_name: "team_name"
+          # inert at output_type "str" (series-only); pinned so it stays out of
+          # the config form.
+          fan_out: true
 
       - name: Retain Attribute Columns
         id: patrol_attribute_columns

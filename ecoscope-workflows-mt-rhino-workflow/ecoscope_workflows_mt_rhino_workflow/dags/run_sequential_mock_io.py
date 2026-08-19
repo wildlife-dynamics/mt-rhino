@@ -405,6 +405,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             field_name_options=["Team name", "Team_name"],
             output_type="str",
             output_column_name="team_name",
+            fan_out=True,
             **(params.get("extract_team_name") or {}),
         )
         .call()
