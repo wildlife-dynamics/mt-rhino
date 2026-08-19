@@ -31,7 +31,10 @@ mock:
         - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
           opacity: 1
     rhino_report:
-      template_path: "../resources/templates/mt_rhino_report_template.docx"  # relative to the inner workflow dir (CLI cwd); publish flow restores the raw URL
+      # SHA-pinned raw URL: the template changed on this branch, so a main-ref
+      # URL serves the stale copy until the PR merges. d7ae178 carries the
+      # current template (identical to what main will have post-merge).
+      template_path: "https://raw.githubusercontent.com/wildlife-dynamics/mt-rhino/d7ae178/resources/templates/mt_rhino_report_template.docx"
 
 mock_empty:
   name: Mara Triangle Rhino Report (mocked IO, empty fixtures — skipif/placeholder path)
@@ -64,7 +67,10 @@ mock_empty:
         - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
           opacity: 1
     rhino_report:
-      template_path: "../resources/templates/mt_rhino_report_template.docx"  # relative to the inner workflow dir (CLI cwd); publish flow restores the raw URL
+      # SHA-pinned raw URL: the template changed on this branch, so a main-ref
+      # URL serves the stale copy until the PR merges. d7ae178 carries the
+      # current template (identical to what main will have post-merge).
+      template_path: "https://raw.githubusercontent.com/wildlife-dynamics/mt-rhino/d7ae178/resources/templates/mt_rhino_report_template.docx"
 
 base:
   name: Mara Triangle Rhino Report
@@ -89,4 +95,7 @@ base:
         - url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
           opacity: 1
     rhino_report:
-      template_path: "../resources/templates/mt_rhino_report_template.docx"  # relative to the inner workflow dir (CLI cwd); publish flow restores the raw URL
+      # SHA-pinned raw URL: the template changed on this branch, so a main-ref
+      # URL serves the stale copy until the PR merges. d7ae178 carries the
+      # current template (identical to what main will have post-merge).
+      template_path: "https://raw.githubusercontent.com/wildlife-dynamics/mt-rhino/d7ae178/resources/templates/mt_rhino_report_template.docx"

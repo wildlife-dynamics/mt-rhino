@@ -1,55 +1,21 @@
 id: mt_rhino
 
 requirements:
-  # DEV ONLY: local editable ecoscope on branch optional-time-interval
-  # (worktree checkout), which carries the generalized draw_chart task
+  # >=2.18.4 required: first release shipping the generalized draw_chart task
   # (optional time_interval -> categorical x axis, per-figure bar/line).
-  # Before publish: revert to a released ecoscope-platform pin that ships
-  # draw_chart. Run dev/postcompile-editable.sh after every compile
-  # (pydantic + platform patches), then test with --frozen.
-  # NOTE: "plotting" extra is required — ext-custom's entry point imports
-  # plotly via the ecoplot helpers, and without it discovery silently drops
-  # every ext-custom task.
-  - name: ecoscope
-    path: /Users/yunwu/MEP/wt-tasks/ecoscope/.claude/worktrees/optional-time-interval
-    editable: true
-    extras: ["platform", "mapping", "analysis", "plotting"]
-  # DEV MODE: editable local ext-custom (pivot_dataframe,
-  # merge_two_dataframes, create_docx). Before publish: restore the
-  # versioned channel requirement (>= 0.1.0rc24).
-  - name: ecoscope-workflows-ext-custom
-    path: /Users/yunwu/MEP/wt-tasks/ecoscope-workflow-task-library/src/ecoscope-workflows-ext-custom
-    editable: true
-  # editable ext-custom declares setuptools<=81.0.0; pin the conda side to
-  # match or the pypi solve conflicts with the conda-pinned setuptools
-  - name: setuptools
-    version: "<=81.0.0"
-    channel: conda-forge
-  # Editable-mode conda pins (see ecoscope-spec.md "editable dev-mode
-  # pitfalls"): lonboard ==0.0.8 only exists as the conda build on the
-  # ecoscope-workflows channel; numpy is pinned strictly by ecoscope;
-  # pyarrow <24 per ecoscope-earthranger-io-core; rasterio <1.5 avoids the
-  # libgdal/pyogrio conflict and the missing osx-arm64 wheel.
-  - name: lonboard
-    version: "==0.0.8"
+  - name: ecoscope-platform
+    version: ">=2.19.0, <2.20.0"
     channel: https://repo.prefix.dev/ecoscope-workflows/
-  - name: numpy
-    version: ">=2,<2.1"
-    channel: conda-forge
-  - name: pyarrow
-    version: ">=20,<24"
-    channel: conda-forge
-  - name: rasterio
-    version: ">=1.3,<1.5"
-    channel: conda-forge
+  # rc25 required: create_docx tolerates skipped direct context items and
+  # renders missing_text placeholders for empty report sections.
+  - name: ecoscope-workflows-ext-custom
+    version: "0.1.0rc25"
+    channel: https://repo.prefix.dev/ecoscope-workflows-custom/
+  # ecoscope-platform already declares this exact pydeck dependency. it is
+  # re-stated here as a workaround for a known issue. for further detail, see:
+  # https://github.com/wildlife-dynamics/wt/issues/167#issuecomment-4451993697
   - name: pydeck
     version: "0.9.2"
-    channel: conda-forge
-  # editable ecoscope pins pydantic <2.9 (newer breaks discriminated unions
-  # in apply_classification); declare it here so the conda solve pins a
-  # compatible version and the pin survives --install/--update
-  - name: pydantic
-    version: ">=2.0.0,<2.9.0"
     channel: conda-forge
 
 rjsf-overrides:

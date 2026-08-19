@@ -68,6 +68,20 @@
       "type": "object",
       "title": "Data Source"
     },
+    "extract_team_name": {
+      "additionalProperties": false,
+      "properties": {
+        "fan_out": {
+          "default": true,
+          "title": "Fan Out",
+          "type": "boolean",
+          "description": "Only used when output_type is 'series'. If true (default), expand the extracted collection into indexed columns prefixed by output_column_name. If false, store it as a list in a single output_column_name column."
+        }
+      },
+      "required": [],
+      "type": "object",
+      "title": "Extract Team Name"
+    },
     "patrol_traj": {
       "additionalProperties": false,
       "properties": {
@@ -412,6 +426,7 @@
       "workflow_details",
       "time_range",
       "er_client_name",
+      "extract_team_name",
       "patrol_traj",
       "base_map_defs",
       "rhino_report"

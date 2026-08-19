@@ -68,6 +68,27 @@
       "type": "object",
       "title": "Data Source"
     },
+    "Patrol Attributes": {
+      "type": "object",
+      "description": "Extract the team name from patrol_information events.",
+      "ecoscope:task_group": true,
+      "properties": {
+        "extract_team_name": {
+          "additionalProperties": false,
+          "properties": {
+            "fan_out": {
+              "default": true,
+              "title": "Fan Out",
+              "type": "boolean",
+              "description": "Only used when output_type is 'series'. If true (default), expand the extracted collection into indexed columns prefixed by output_column_name. If false, store it as a list in a single output_column_name column."
+            }
+          },
+          "required": [],
+          "type": "object",
+          "title": "Extract Team Name"
+        }
+      }
+    },
     "Process Patrols": {
       "type": "object",
       "description": "Process patrol observations into rhino monitoring trajectories.",
@@ -412,6 +433,7 @@
       "workflow_details",
       "time_range",
       "er_client_name",
+      "Patrol Attributes",
       "Process Patrols",
       "base_map_defs",
       "rhino_report"
