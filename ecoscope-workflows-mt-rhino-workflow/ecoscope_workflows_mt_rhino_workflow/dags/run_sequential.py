@@ -9,13 +9,20 @@ from ecoscope.platform.tasks.filter import (
     get_timezone_from_time_range as get_timezone_from_time_range,
 )
 from ecoscope.platform.tasks.filter import set_time_range as set_time_range
-from ecoscope.platform.tasks.io import get_events_from_smart as get_events_from_smart
+from ecoscope.platform.tasks.io import get_events as get_events
 from ecoscope.platform.tasks.io import (
-    get_patrol_observations_from_smart as get_patrol_observations_from_smart,
+    get_patrol_observations_from_patrols_df_and_combined_params as get_patrol_observations_from_patrols_df_and_combined_params,
+)
+from ecoscope.platform.tasks.io import (
+    get_patrols_from_combined_params as get_patrols_from_combined_params,
 )
 from ecoscope.platform.tasks.io import persist_df_wrapper as persist_df_wrapper
 from ecoscope.platform.tasks.io import persist_text as persist_text
-from ecoscope.platform.tasks.io import set_smart_connection as set_smart_connection
+from ecoscope.platform.tasks.io import process_events_details as process_events_details
+from ecoscope.platform.tasks.io import set_er_connection as set_er_connection
+from ecoscope.platform.tasks.io import (
+    set_patrols_and_patrol_events_params as set_patrols_and_patrol_events_params,
+)
 from ecoscope.platform.tasks.preprocessing import (
     relocations_to_trajectory as relocations_to_trajectory,
 )
@@ -32,7 +39,7 @@ from ecoscope.platform.tasks.results import (
 from ecoscope.platform.tasks.results import (
     create_table_widget_single_view as create_table_widget_single_view,
 )
-from ecoscope.platform.tasks.results import draw_bar_chart as draw_bar_chart
+from ecoscope.platform.tasks.results import draw_chart as draw_chart
 from ecoscope.platform.tasks.results import draw_ecomap as draw_ecomap
 from ecoscope.platform.tasks.results import draw_table as draw_table
 from ecoscope.platform.tasks.results import gather_dashboard as gather_dashboard
@@ -55,13 +62,20 @@ from ecoscope.platform.tasks.transformation import (
 from ecoscope.platform.tasks.transformation import (
     drop_column_prefix as drop_column_prefix,
 )
-from ecoscope.platform.tasks.transformation import map_columns as map_columns
+from ecoscope.platform.tasks.transformation import explode as explode
 from ecoscope.platform.tasks.transformation import (
-    normalize_json_column as normalize_json_column,
+    extract_value_from_json_column as extract_value_from_json_column,
 )
+from ecoscope.platform.tasks.transformation import map_columns as map_columns
 from ecoscope_workflows_ext_custom.tasks.results import create_docx as create_docx
 from ecoscope_workflows_ext_custom.tasks.transformation import (
     filter_row_values as filter_row_values,
+)
+from ecoscope_workflows_ext_custom.tasks.transformation import (
+    merge_two_dataframes as merge_two_dataframes,
+)
+from ecoscope_workflows_ext_custom.tasks.transformation import (
+    pivot_dataframe as pivot_dataframe,
 )
 from wt_contracts import validate as _validate
 from wt_task import task
@@ -124,10 +138,10 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .call()
     )
 
-    smart_client_name = (
-        task(set_smart_connection)
+    er_client_name = (
+        task(set_er_connection)
         .validate()
-        .set_task_instance_id("smart_client_name")
+        .set_task_instance_id("er_client_name")
         .handle_errors()
         .with_tracing()
         .skipif(
@@ -137,12 +151,66 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             ],
             unpack_depth=1,
         )
-        .partial(**(params.get("smart_client_name") or {}))
+        .partial(**(params.get("er_client_name") or {}))
+        .call()
+    )
+
+    er_patrol_params = (
+        task(set_patrols_and_patrol_events_params)
+        .validate()
+        .set_task_instance_id("er_patrol_params")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            client=er_client_name,
+            time_range=time_range,
+            patrol_types=[
+                "rhino_monitoring_patrol",
+                "rhino_monitoring_vehicle_patrol",
+                "rhino_monitor_patrol_reserve",
+                "rhino_monitoring_veh_patrol_reserve",
+            ],
+            event_types=[],
+            status=["done"],
+            include_patrol_details=True,
+            raise_on_empty=False,
+            include_null_geometry=True,
+            truncate_to_time_range=True,
+            sub_page_size=100,
+            patrols_overlap_daterange=True,
+            **(params.get("er_patrol_params") or {}),
+        )
+        .call()
+    )
+
+    prefetch_patrols = (
+        task(get_patrols_from_combined_params)
+        .validate()
+        .set_task_instance_id("prefetch_patrols")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            combined_params=er_patrol_params, **(params.get("prefetch_patrols") or {})
+        )
         .call()
     )
 
     patrol_obs = (
-        task(get_patrol_observations_from_smart)
+        task(get_patrol_observations_from_patrols_df_and_combined_params)
         .validate()
         .set_task_instance_id("patrol_obs")
         .handle_errors()
@@ -155,13 +223,202 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            client=smart_client_name,
-            time_range=time_range,
-            ca_uuid="735606d2-c34e-49c3-a45b-7496ca834e58",
-            language_uuid="13451893-86af-4ec0-beac-2b8e0c2482b5",
-            patrol_mandate=None,
-            patrol_transport=None,
+            patrols_df=prefetch_patrols,
+            combined_params=er_patrol_params,
             **(params.get("patrol_obs") or {}),
+        )
+        .call()
+    )
+
+    patrol_info_raw = (
+        task(get_events)
+        .validate()
+        .set_task_instance_id("patrol_info_raw")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            client=er_client_name,
+            time_range=time_range,
+            event_types=["patrol_information"],
+            event_columns=None,
+            include_null_geometry=True,
+            raise_on_empty=False,
+            include_details=True,
+            include_updates=False,
+            include_related_events=False,
+            include_display_values=False,
+            force_point_geometry=True,
+            **(params.get("patrol_info_raw") or {}),
+        )
+        .call()
+    )
+
+    patrol_info_events = (
+        task(process_events_details)
+        .validate()
+        .set_task_instance_id("patrol_info_events")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=patrol_info_raw,
+            client=er_client_name,
+            map_to_titles=True,
+            ordered=True,
+            **(params.get("patrol_info_events") or {}),
+        )
+        .call()
+    )
+
+    patrol_info_only = (
+        task(filter_row_values)
+        .validate()
+        .set_task_instance_id("patrol_info_only")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=patrol_info_events,
+            column="event_type",
+            values=["patrol_information"],
+            **(params.get("patrol_info_only") or {}),
+        )
+        .call()
+    )
+
+    explode_event_patrols = (
+        task(explode)
+        .validate()
+        .set_task_instance_id("explode_event_patrols")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=patrol_info_only,
+            column_name="patrols",
+            ignore_index=True,
+            **(params.get("explode_event_patrols") or {}),
+        )
+        .call()
+    )
+
+    event_patrol_id = (
+        task(map_columns)
+        .validate()
+        .set_task_instance_id("event_patrol_id")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=explode_event_patrols,
+            rename_columns={"patrols": "patrol_id"},
+            drop_columns=[],
+            retain_columns=[],
+            raise_if_not_found=True,
+            **(params.get("event_patrol_id") or {}),
+        )
+        .call()
+    )
+
+    extract_team_name = (
+        task(extract_value_from_json_column)
+        .validate()
+        .set_task_instance_id("extract_team_name")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=event_patrol_id,
+            column_name="event_details",
+            field_name_options=["Team name", "Team_name"],
+            output_type="str",
+            output_column_name="team_name",
+            fan_out=True,
+            **(params.get("extract_team_name") or {}),
+        )
+        .call()
+    )
+
+    patrol_attribute_columns = (
+        task(map_columns)
+        .validate()
+        .set_task_instance_id("patrol_attribute_columns")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=extract_team_name,
+            rename_columns={},
+            drop_columns=[],
+            retain_columns=["patrol_id", "team_name"],
+            raise_if_not_found=False,
+            **(params.get("patrol_attribute_columns") or {}),
+        )
+        .call()
+    )
+
+    patrol_attributes = (
+        task(apply_sql_query)
+        .validate()
+        .set_task_instance_id("patrol_attributes")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=patrol_attribute_columns,
+            query="SELECT patrol_id, MAX(team_name) AS team_name FROM df GROUP BY patrol_id\n",
+            columns=None,
+            sanitize=True,
+            **(params.get("patrol_attributes") or {}),
         )
         .call()
     )
@@ -182,7 +439,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .partial(
             df=patrol_obs,
             timezone=get_timezone,
-            columns=["fixtime"],
+            columns=["fixtime", "patrol_start_time", "patrol_end_time"],
             **(params.get("convert_patrols_tz") or {}),
         )
         .call()
@@ -210,6 +467,33 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .call()
     )
 
+    rename_patrol_cols = (
+        task(map_columns)
+        .validate()
+        .set_task_instance_id("rename_patrol_cols")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=drop_prefix_obs,
+            drop_columns=["patrol_type"],
+            rename_columns={
+                "patrol_type__value": "patrol_type",
+                "patrol_type__display": "patrol_type_display",
+            },
+            retain_columns=[],
+            raise_if_not_found=False,
+            **(params.get("rename_patrol_cols") or {}),
+        )
+        .call()
+    )
+
     filter_patrol_coords = (
         task(apply_reloc_coord_filter)
         .validate()
@@ -224,7 +508,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            df=drop_prefix_obs,
+            df=rename_patrol_cols,
             roi_gdf=None,
             roi_name=None,
             reset_index=False,
@@ -307,10 +591,10 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .call()
     )
 
-    filter_rhino_patrols = (
-        task(filter_row_values)
+    traj_with_attributes = (
+        task(merge_two_dataframes)
         .validate()
-        .set_task_instance_id("filter_rhino_patrols")
+        .set_task_instance_id("traj_with_attributes")
         .handle_errors()
         .with_tracing()
         .skipif(
@@ -321,10 +605,16 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            df=cleanup_traj_cols,
-            column="patrol_mandate",
-            values=["Rhino Monitoring"],
-            **(params.get("filter_rhino_patrols") or {}),
+            left=cleanup_traj_cols,
+            right=patrol_attributes,
+            how="left",
+            on="patrol_id",
+            left_on=None,
+            right_on=None,
+            left_index=False,
+            right_index=False,
+            fillna_value="Unknown",
+            **(params.get("traj_with_attributes") or {}),
         )
         .call()
     )
@@ -343,19 +633,36 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            df=filter_rhino_patrols,
-            input_column_name="station",
-            output_column_name="patrol_colormap",
-            colormap="Dark2",
+            df=traj_with_attributes,
+            input_column_name="team_name",
+            output_column_name="team_colormap",
+            colormap=[
+                "#FF9600",
+                "#F23B0E",
+                "#A100CB",
+                "#F04564",
+                "#03421A",
+                "#3089FF",
+                "#E26FFF",
+                "#8C1700",
+                "#002960",
+                "#FFD000",
+                "#B62879",
+                "#680078",
+                "#005A56",
+                "#0056C7",
+                "#331878",
+                "#E76826",
+            ],
             **(params.get("patrol_colormap") or {}),
         )
         .call()
     )
 
-    smart_events = (
-        task(get_events_from_smart)
+    er_events = (
+        task(get_events)
         .validate()
-        .set_task_instance_id("smart_events")
+        .set_task_instance_id("er_events")
         .handle_errors()
         .with_tracing()
         .skipif(
@@ -366,11 +673,63 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            client=smart_client_name,
+            client=er_client_name,
             time_range=time_range,
-            ca_uuid="735606d2-c34e-49c3-a45b-7496ca834e58",
-            language_uuid="13451893-86af-4ec0-beac-2b8e0c2482b5",
-            **(params.get("smart_events") or {}),
+            event_types=["black_rhino_sighting_v202310"],
+            event_columns=None,
+            include_null_geometry=False,
+            raise_on_empty=False,
+            include_details=True,
+            include_updates=False,
+            include_related_events=False,
+            include_display_values=True,
+            force_point_geometry=True,
+            **(params.get("er_events") or {}),
+        )
+        .call()
+    )
+
+    events_details = (
+        task(process_events_details)
+        .validate()
+        .set_task_instance_id("events_details")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=er_events,
+            client=er_client_name,
+            map_to_titles=True,
+            ordered=True,
+            **(params.get("events_details") or {}),
+        )
+        .call()
+    )
+
+    rhino_events_only = (
+        task(filter_row_values)
+        .validate()
+        .set_task_instance_id("rhino_events_only")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=events_details,
+            column="event_type",
+            values=["black_rhino_sighting_v202310"],
+            **(params.get("rhino_events_only") or {}),
         )
         .call()
     )
@@ -389,7 +748,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            df=smart_events,
+            df=rhino_events_only,
             timezone=get_timezone,
             columns=["time"],
             **(params.get("convert_events_tz") or {}),
@@ -431,10 +790,10 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .call()
     )
 
-    normalize_attrs = (
-        task(normalize_json_column)
+    rhino_obs_long = (
+        task(apply_sql_query)
         .validate()
-        .set_task_instance_id("normalize_attrs")
+        .set_task_instance_id("rhino_obs_long")
         .handle_errors()
         .with_tracing()
         .skipif(
@@ -446,40 +805,10 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         )
         .partial(
             df=filter_event_coords,
-            column="extracted_attributes",
-            skip_if_not_exists=True,
-            sort_columns=True,
-            **(params.get("normalize_attrs") or {}),
-        )
-        .call()
-    )
-
-    process_rhino = (
-        task(apply_sql_query)
-        .validate()
-        .set_task_instance_id("process_rhino")
-        .handle_errors()
-        .with_tracing()
-        .skipif(
-            conditions=[
-                any_is_empty_df,
-                any_dependency_skipped,
-            ],
-            unpack_depth=1,
-        )
-        .partial(
-            df=normalize_attrs,
-            columns=[
-                "uuid",
-                "event_type",
-                "X",
-                "Y",
-                "time",
-                "geometry",
-                "extracted_attributes__Rhino Name",
-            ],
-            query='SELECT uuid, X, Y, time, geometry,\n  "extracted_attributes__Rhino Name" AS "Rhino Name"\nFROM df WHERE event_type = \'Rhino Direct Observation\'\n  AND "extracted_attributes__Rhino Name" IS NOT NULL',
-            **(params.get("process_rhino") or {}),
+            sanitize=True,
+            columns=None,
+            query='SELECT * FROM (\n  SELECT df.id AS event_id, df.serial_number, df.time, df.geometry,\n    COALESCE(json_extract(j.value, \'$."Bull"\'), json_extract(j.value, \'$."Kifaru ID"\')) AS "Rhino Name",\n    COALESCE(json_extract(j.value, \'$."Sighting"\'), \'Unknown\') AS "Sighting Method"\n  FROM df, json_each(COALESCE(json_extract(df.event_details, \'$."Sighting Details - Bulls"\'), \'[]\')) AS j\n  UNION ALL\n  SELECT df.id AS event_id, df.serial_number, df.time, df.geometry,\n    COALESCE(json_extract(j.value, \'$."Known Cows"\'), json_extract(j.value, \'$."Kifaru ID"\')) AS "Rhino Name",\n    COALESCE(json_extract(j.value, \'$."Sighting"\'), \'Unknown\') AS "Sighting Method"\n  FROM df, json_each(COALESCE(json_extract(df.event_details, \'$."Sighting Details - Cows"\'), \'[]\')) AS j\n  UNION ALL\n  SELECT df.id AS event_id, df.serial_number, df.time, df.geometry,\n    COALESCE(json_extract(j.value, \'$."Unsexed Individual(s)"\'), json_extract(j.value, \'$."Kifaru ID"\')) AS "Rhino Name",\n    COALESCE(json_extract(j.value, \'$."Sighting"\'), \'Unknown\') AS "Sighting Method"\n  FROM df, json_each(COALESCE(json_extract(df.event_details, \'$."Sighting Details - Unsexed Individuals"\'), \'[]\')) AS j\n) WHERE "Rhino Name" IS NOT NULL',
+            **(params.get("rhino_obs_long") or {}),
         )
         .call()
     )
@@ -498,10 +827,10 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            df=process_rhino,
+            df=rhino_obs_long,
             input_column_name="Rhino Name",
             output_column_name="rhino_colormap",
-            colormap="Dark2",
+            colormap="tab20b",
             **(params.get("rhino_colormap") or {}),
         )
         .call()
@@ -520,7 +849,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            df=filter_rhino_patrols,
+            df=traj_with_attributes,
             root_path=os.environ["ECOSCOPE_WORKFLOWS_RESULTS"],
             filename_prefix="rhino_patrol_trajectories",
             filetypes=["parquet"],
@@ -543,7 +872,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            df=process_rhino,
+            df=rhino_obs_long,
             root_path=os.environ["ECOSCOPE_WORKFLOWS_RESULTS"],
             filename_prefix="rhino_observations",
             filetypes=["parquet"],
@@ -570,10 +899,10 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .call()
     )
 
-    set_patrol_map_title = (
+    set_tri_map_title = (
         task(set_string_var)
         .validate()
-        .set_task_instance_id("set_patrol_map_title")
+        .set_task_instance_id("set_tri_map_title")
         .handle_errors()
         .with_tracing()
         .skipif(
@@ -584,16 +913,15 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            var="Rhino Patrol Trajectories",
-            **(params.get("set_patrol_map_title") or {}),
+            var="Mara Triangle Rhino Patrols", **(params.get("set_tri_map_title") or {})
         )
         .call()
     )
 
-    rename_traj_cols = (
-        task(map_columns)
+    filter_tri_traj = (
+        task(filter_row_values)
         .validate()
-        .set_task_instance_id("rename_traj_cols")
+        .set_task_instance_id("filter_tri_traj")
         .handle_errors()
         .with_tracing()
         .skipif(
@@ -605,23 +933,46 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         )
         .partial(
             df=patrol_colormap,
-            rename_columns={
-                "segment_start": "Start Time",
-                "timespan_seconds": "Duration (s)",
-                "speed_kmhr": "Speed (kph)",
-            },
-            drop_columns=[],
-            retain_columns=[],
-            raise_if_not_found=False,
-            **(params.get("rename_traj_cols") or {}),
+            column="patrol_type",
+            values=["rhino_monitoring_patrol", "rhino_monitoring_vehicle_patrol"],
+            **(params.get("filter_tri_traj") or {}),
         )
         .call()
     )
 
-    patrol_polyline = (
+    rename_tri_cols = (
+        task(map_columns)
+        .validate()
+        .set_task_instance_id("rename_tri_cols")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=filter_tri_traj,
+            drop_columns=[],
+            retain_columns=[],
+            raise_if_not_found=False,
+            rename_columns={
+                "segment_start": "Start Time",
+                "timespan_seconds": "Duration (s)",
+                "speed_kmhr": "Speed (kph)",
+                "team_name": "Team",
+            },
+            **(params.get("rename_tri_cols") or {}),
+        )
+        .call()
+    )
+
+    tri_polyline = (
         task(create_polyline_layer)
         .validate()
-        .set_task_instance_id("patrol_polyline")
+        .set_task_instance_id("tri_polyline")
         .handle_errors()
         .with_tracing()
         .skipif(
@@ -633,23 +984,23 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            geodataframe=rename_traj_cols,
+            geodataframe=rename_tri_cols,
             layer_style={
                 "get_width": 3,
                 "width_units": "pixels",
-                "color_column": "patrol_colormap",
+                "color_column": "team_colormap",
             },
-            legend={"label_column": "station", "color_column": "patrol_colormap"},
-            tooltip_columns=["Start Time", "Duration (s)", "Speed (kph)"],
-            **(params.get("patrol_polyline") or {}),
+            legend={"label_column": "Team", "color_column": "team_colormap"},
+            tooltip_columns=["Team", "Start Time", "Duration (s)", "Speed (kph)"],
+            **(params.get("tri_polyline") or {}),
         )
         .call()
     )
 
-    patrol_ecomap = (
+    tri_ecomap = (
         task(draw_ecomap)
         .validate()
-        .set_task_instance_id("patrol_ecomap")
+        .set_task_instance_id("tri_ecomap")
         .handle_errors()
         .with_tracing()
         .skipif(
@@ -660,22 +1011,22 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            geo_layers=patrol_polyline,
+            geo_layers=tri_polyline,
             tile_layers=base_map_defs,
             north_arrow_style={"placement": "top-left"},
-            legend_style={"title": "Station", "placement": "bottom-right"},
+            legend_style={"title": "Team", "placement": "bottom-right"},
             static=False,
             title=None,
             max_zoom=20,
-            **(params.get("patrol_ecomap") or {}),
+            **(params.get("tri_ecomap") or {}),
         )
         .call()
     )
 
-    persist_patrol_ecomap = (
+    persist_tri_ecomap = (
         task(persist_text)
         .validate()
-        .set_task_instance_id("persist_patrol_ecomap")
+        .set_task_instance_id("persist_tri_ecomap")
         .handle_errors()
         .with_tracing()
         .skipif(
@@ -686,18 +1037,18 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            text=patrol_ecomap,
+            text=tri_ecomap,
             root_path=os.environ["ECOSCOPE_WORKFLOWS_RESULTS"],
-            filename_suffix="patrol_map",
-            **(params.get("persist_patrol_ecomap") or {}),
+            filename_suffix="triangle_patrol_map",
+            **(params.get("persist_tri_ecomap") or {}),
         )
         .call()
     )
 
-    patrol_map_widget = (
+    tri_map_widget = (
         task(create_map_widget_single_view)
         .validate()
-        .set_task_instance_id("patrol_map_widget")
+        .set_task_instance_id("tri_map_widget")
         .handle_errors()
         .with_tracing()
         .skipif(
@@ -707,17 +1058,17 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            title=set_patrol_map_title,
-            data=persist_patrol_ecomap,
-            **(params.get("patrol_map_widget") or {}),
+            title=set_tri_map_title,
+            data=persist_tri_ecomap,
+            **(params.get("tri_map_widget") or {}),
         )
         .call()
     )
 
-    merged_patrol_map = (
+    merged_tri_map = (
         task(merge_widget_views)
         .validate()
-        .set_task_instance_id("merged_patrol_map")
+        .set_task_instance_id("merged_tri_map")
         .handle_errors()
         .with_tracing()
         .skipif(
@@ -727,7 +1078,191 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             ],
             unpack_depth=1,
         )
-        .partial(widgets=[patrol_map_widget], **(params.get("merged_patrol_map") or {}))
+        .partial(widgets=[tri_map_widget], **(params.get("merged_tri_map") or {}))
+        .call()
+    )
+
+    set_res_map_title = (
+        task(set_string_var)
+        .validate()
+        .set_task_instance_id("set_res_map_title")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(var="Reserve Rhino Patrols", **(params.get("set_res_map_title") or {}))
+        .call()
+    )
+
+    filter_res_traj = (
+        task(filter_row_values)
+        .validate()
+        .set_task_instance_id("filter_res_traj")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=patrol_colormap,
+            column="patrol_type",
+            values=[
+                "rhino_monitor_patrol_reserve",
+                "rhino_monitoring_veh_patrol_reserve",
+            ],
+            **(params.get("filter_res_traj") or {}),
+        )
+        .call()
+    )
+
+    rename_res_cols = (
+        task(map_columns)
+        .validate()
+        .set_task_instance_id("rename_res_cols")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=filter_res_traj,
+            drop_columns=[],
+            retain_columns=[],
+            raise_if_not_found=False,
+            rename_columns={
+                "segment_start": "Start Time",
+                "timespan_seconds": "Duration (s)",
+                "speed_kmhr": "Speed (kph)",
+                "team_name": "Team",
+            },
+            **(params.get("rename_res_cols") or {}),
+        )
+        .call()
+    )
+
+    res_polyline = (
+        task(create_polyline_layer)
+        .validate()
+        .set_task_instance_id("res_polyline")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+                all_geometry_are_none,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            geodataframe=rename_res_cols,
+            layer_style={
+                "get_width": 3,
+                "width_units": "pixels",
+                "color_column": "team_colormap",
+            },
+            legend={"label_column": "Team", "color_column": "team_colormap"},
+            tooltip_columns=["Team", "Start Time", "Duration (s)", "Speed (kph)"],
+            **(params.get("res_polyline") or {}),
+        )
+        .call()
+    )
+
+    res_ecomap = (
+        task(draw_ecomap)
+        .validate()
+        .set_task_instance_id("res_ecomap")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            geo_layers=res_polyline,
+            tile_layers=base_map_defs,
+            north_arrow_style={"placement": "top-left"},
+            legend_style={"title": "Team", "placement": "bottom-right"},
+            static=False,
+            title=None,
+            max_zoom=20,
+            **(params.get("res_ecomap") or {}),
+        )
+        .call()
+    )
+
+    persist_res_ecomap = (
+        task(persist_text)
+        .validate()
+        .set_task_instance_id("persist_res_ecomap")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            text=res_ecomap,
+            root_path=os.environ["ECOSCOPE_WORKFLOWS_RESULTS"],
+            filename_suffix="reserve_patrol_map",
+            **(params.get("persist_res_ecomap") or {}),
+        )
+        .call()
+    )
+
+    res_map_widget = (
+        task(create_map_widget_single_view)
+        .validate()
+        .set_task_instance_id("res_map_widget")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                never,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            title=set_res_map_title,
+            data=persist_res_ecomap,
+            **(params.get("res_map_widget") or {}),
+        )
+        .call()
+    )
+
+    merged_res_map = (
+        task(merge_widget_views)
+        .validate()
+        .set_task_instance_id("merged_res_map")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(widgets=[res_map_widget], **(params.get("merged_res_map") or {}))
         .call()
     )
 
@@ -765,8 +1300,12 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .partial(
             geodataframe=rhino_colormap,
             layer_style={"get_radius": 5.0, "fill_color_column": "rhino_colormap"},
-            legend={"label_column": "Rhino Name", "color_column": "rhino_colormap"},
-            tooltip_columns=["Rhino Name", "time"],
+            legend={
+                "label_column": "Rhino Name",
+                "color_column": "rhino_colormap",
+                "sort": "ascending",
+            },
+            tooltip_columns=["Rhino Name", "Sighting Method", "time"],
             **(params.get("rhino_point_layer") or {}),
         )
         .call()
@@ -789,7 +1328,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             geo_layers=rhino_point_layer,
             tile_layers=base_map_defs,
             north_arrow_style={"placement": "top-left"},
-            legend_style={"title": "Rhino Name", "placement": "bottom-right"},
+            legend_style={"title": "Rhino", "placement": "bottom-right"},
             static=False,
             title=None,
             max_zoom=13,
@@ -857,8 +1396,82 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .call()
     )
 
-    rhino_summary = (
+    method_counts = (
         task(summarize_df)
+        .validate()
+        .set_task_instance_id("method_counts")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=rhino_obs_long,
+            groupby_cols=["Rhino Name", "Sighting Method"],
+            reset_index=True,
+            summary_params=[
+                {"display_name": "Count", "aggregator": "count", "column": "event_id"}
+            ],
+            **(params.get("method_counts") or {}),
+        )
+        .call()
+    )
+
+    method_pivot = (
+        task(pivot_dataframe)
+        .validate()
+        .set_task_instance_id("method_pivot")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=method_counts,
+            index="Rhino Name",
+            columns="Sighting Method",
+            values="Count",
+            fill_value=0,
+            **(params.get("method_pivot") or {}),
+        )
+        .call()
+    )
+
+    rhino_totals = (
+        task(summarize_df)
+        .validate()
+        .set_task_instance_id("rhino_totals")
+        .handle_errors()
+        .with_tracing()
+        .skipif(
+            conditions=[
+                any_is_empty_df,
+                any_dependency_skipped,
+            ],
+            unpack_depth=1,
+        )
+        .partial(
+            df=rhino_obs_long,
+            groupby_cols=["Rhino Name"],
+            reset_index=True,
+            summary_params=[
+                {"display_name": "Total", "aggregator": "count", "column": "event_id"}
+            ],
+            **(params.get("rhino_totals") or {}),
+        )
+        .call()
+    )
+
+    rhino_summary = (
+        task(merge_two_dataframes)
         .validate()
         .set_task_instance_id("rhino_summary")
         .handle_errors()
@@ -871,12 +1484,15 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            df=process_rhino,
-            groupby_cols=["Rhino Name"],
-            reset_index=True,
-            summary_params=[
-                {"display_name": "Count", "aggregator": "count", "column": "uuid"}
-            ],
+            left=method_pivot,
+            right=rhino_totals,
+            how="left",
+            on="Rhino Name",
+            left_on=None,
+            right_on=None,
+            left_index=False,
+            right_index=False,
+            fillna_value=0,
             **(params.get("rhino_summary") or {}),
         )
         .call()
@@ -937,7 +1553,7 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         )
         .partial(
             dataframe=rhino_summary,
-            columns=["Rhino Name", "Count"],
+            columns=None,
             table_config={
                 "enable_sorting": True,
                 "enable_filtering": True,
@@ -1021,12 +1637,12 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             ],
             unpack_depth=1,
         )
-        .partial(var="Rhino Sighting Counts", **(params.get("set_bar_title") or {}))
+        .partial(var="Rhino Sightings by Method", **(params.get("set_bar_title") or {}))
         .call()
     )
 
     rhino_bar = (
-        task(draw_bar_chart)
+        task(draw_chart)
         .validate()
         .set_task_instance_id("rhino_bar")
         .handle_errors()
@@ -1039,18 +1655,29 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
             unpack_depth=1,
         )
         .partial(
-            dataframe=rhino_summary,
-            category="Rhino Name",
-            layout_kwargs=None,
-            bar_chart_configs=[
+            dataframe=rhino_obs_long,
+            x_axis="Rhino Name",
+            figures=[
                 {
-                    "label": "Count of Sightings",
-                    "column": "Count",
-                    "agg_func": "sum",
-                    "show_label": True,
-                    "style": {"marker_color": "#35b779"},
+                    "metric": {
+                        "display_name": "Sightings",
+                        "aggregator": "count",
+                        "column": "event_id",
+                    },
+                    "chart_type": "bar",
                 }
             ],
+            time_interval=None,
+            category="Sighting Method",
+            time_breakdown=None,
+            barmode="stack",
+            palette="Dark2",
+            plot_style=None,
+            layout_style={
+                "showlegend": True,
+                "legend_title": "Sighting Method",
+                "yaxis": {"title": "Sightings"},
+            },
             **(params.get("rhino_bar") or {}),
         )
         .call()
@@ -1121,11 +1748,14 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .with_tracing()
         .skipif(
             conditions=[
-                never,
+                any_is_empty_df,
+                any_dependency_skipped,
             ],
             unpack_depth=1,
         )
         .partial(
+            skip=False,
+            missing_text="(No data)",
             context={
                 "items": [
                     {
@@ -1136,8 +1766,18 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
                     },
                     {
                         "item_type": "image",
-                        "key": "patrol_map",
-                        "value": persist_patrol_ecomap,
+                        "key": "patrol_map_triangle",
+                        "value": persist_tri_ecomap,
+                        "screenshot_config": {
+                            "wait_for_timeout": 20000,
+                            "max_concurrent_pages": 2,
+                            "device_scale_factor": 1.0,
+                        },
+                    },
+                    {
+                        "item_type": "image",
+                        "key": "patrol_map_reserve",
+                        "value": persist_res_ecomap,
                         "screenshot_config": {
                             "wait_for_timeout": 20000,
                             "max_concurrent_pages": 2,
@@ -1194,7 +1834,8 @@ def main(params: dict[str, Any], validate_params_schema: bool = True):
         .partial(
             details=workflow_details,
             widgets=[
-                merged_patrol_map,
+                merged_tri_map,
+                merged_res_map,
                 merged_rhino_map,
                 merged_table_widget,
                 merged_bar_widget,
